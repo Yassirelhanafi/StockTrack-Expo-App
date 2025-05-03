@@ -166,3 +166,33 @@ stocktrack-expo/
 *   **Testing:** Add unit and integration tests.
 *   **Settings Screen:** Allow configuration of `LOW_STOCK_THRESHOLD`, sync intervals, etc.
 *   **Web Compatibility:** Further investigate and improve camera handling and storage fallback for better web support if desired.
+
+// apiKey: "AIzaSyAG3QNjxIuSjnMtZvAgzcaByKW3vrZBYdo",
+//   authDomain: "stock-track-d0986.firebaseapp.com",
+//   projectId: "stock-track-d0986",
+//   storageBucket: "stock-track-d0986.firebasestorage.app",
+//   messagingSenderId: "150259064182",
+//   appId: "1:150259064182:web:c2377a325219c522be2e57",
+//   measurementId: "G-09DJ7F4VGB"
+
+// Import the functions you need from the SDKs you need
+// import { initializeApp } from "firebase/app";
+// import { getAnalytics } from "firebase/analytics";
+// // TODO: Add SDKs for Firebase products that you want to use
+// // https://firebase.google.com/docs/web/setup#available-libraries
+
+// // Your web app's Firebase configuration
+// // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// const firebaseConfig = {
+//   apiKey: "AIzaSyAG3QNjxIuSjnMtZvAgzcaByKW3vrZBYdo",
+//   authDomain: "stock-track-d0986.firebaseapp.com",
+//   projectId: "stock-track-d0986",
+//   storageBucket: "stock-track-d0986.firebasestorage.app",
+//   messagingSenderId: "150259064182",
+//   appId: "1:150259064182:web:c2377a325219c522be2e57",
+//   measurementId: "G-09DJ7F4VGB"
+// };
+
+// // Initialize Firebase
+// const app = initializeApp(firebaseConfig);
+// const analytics = getAnalytics(app);

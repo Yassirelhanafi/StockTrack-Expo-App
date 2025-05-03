@@ -11,20 +11,20 @@ import { useFirebase } from '@/providers/firebase-provider'; // Hook to check Fi
 // Regex for parsing consumption rate strings (e.g., "5 per day")
 // Allows number, space(s), "per", "every", or "/", space(s), unit (day/week/month)
 // Added escape for '/'
-const CONSUMPTION_RATE_REGEX = /^(\d+)\s*(?:per|every|\/)\s*(day|week|month)$/i;
+const CONSUMPTION_RATE_REGEX = /^(\d+)\s*(?:per\s*)?(day|week|month)$/i;
 
 const LOW_STOCK_THRESHOLD = 10; // Define a threshold for low stock alerts
 
-
+type ConsumptionRate = {
+  amount: number;
+  unit: 'day' | 'week' | 'month';
+};
 // Interface for product data used within this component
 interface ProductData {
   id: string;
   name: string;
   quantity: number;
-  consumptionRate?: {
-    amount: number;
-    unit: 'day' | 'week' | 'month';
-  };
+  consumptionRate?: ConsumptionRate;
   // Timestamps (lastUpdated, lastDecremented) are added right before saving
 }
 
@@ -169,31 +169,35 @@ export default function ScanScreen() {
   // --- Helper Functions ---
 
   // Parses a string like "5 per day" into the consumption rate object
-  const parseConsumptionRate = (
-    rateString: string
-  ): ProductData['consumptionRate'] | undefined => {
-    if (!rateString) return undefined; // Return undefined if string is empty
-    const match = rateString.trim().match(CONSUMPTION_RATE_REGEX);
-    if (match) {
-      const amount = parseInt(match[1], 10);
-      // Type assertion is safe here due to regex group
-      const unit = match[3].toLowerCase() as 'day' | 'week' | 'month';
-      // Validate parsed amount and unit
-      if (!isNaN(amount) && ['day', 'week', 'month'].includes(unit)) {
-        return { amount, unit };
+// Regex: matches patterns like "2 per day", "3 week", "5month", etc.
+
+
+/**
+ * Parses a human-readable consumption rate string into structured data.
+ * Examples:
+ * - "2 per day" → { amount: 2, unit: "day" }
+ * - "3 week" → { amount: 3, unit: "week" }
+ */
+const parseConsumptionRate = (
+  rateString: string
+): ProductData['consumptionRate'] | undefined => {
+  if (!rateString) return undefined;
+
+  const match = rateString.trim().match(CONSUMPTION_RATE_REGEX);
+  if (match) {
+    const amount = parseInt(match[1], 10);
+    const unitRaw = match[2]; // corrected index: second capturing group
+    if (!isNaN(amount) && unitRaw) {
+      const unit = unitRaw.toLowerCase();
+      if (['day', 'week', 'month'].includes(unit)) {
+        return { amount, unit } as ProductData['consumptionRate'];
       }
     }
-    // Log warning and show toast if parsing fails
-    console.warn(`Could not parse consumption rate: "${rateString}"`);
-    Toast.show({
-        type: 'error',
-        text1: 'Invalid Rate Format',
-        text2: 'Use "5 per day", "10 / week", "1 / month"',
-        visibilityTime: 4000,
-        position: 'bottom',
-    })
-    return undefined; // Return undefined on failure
-  };
+  }
+
+  return undefined;
+};
+
 
    // Parses data from a scanned QR code (supports JSON or simple Key:Value)
    const parseQRCodeData = (decodedText: string): ProductData | null => {
