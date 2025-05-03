@@ -1,28 +1,21 @@
-'use client';
+'use client'; // Keep this for potential future client-side use, though initialization is safer server-side/build-time
 
 import type React from 'react';
 import { createContext, useContext, useEffect, useState } from 'react';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getFirestore, type Firestore } from 'firebase/firestore';
-
-// Add your Firebase configuration here
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
+import Constants from 'expo-constants'; // Import Constants
 
 interface FirebaseContextProps {
   app: FirebaseApp | null;
   db: Firestore | null;
+  isFirebaseAvailable: boolean; // Indicate if Firebase is configured and initialized
 }
 
 const FirebaseContext = createContext<FirebaseContextProps>({
   app: null,
   db: null,
+  isFirebaseAvailable: false,
 });
 
 export function useFirebase() {
@@ -36,49 +29,60 @@ export function useFirebase() {
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const [app, setApp] = useState<FirebaseApp | null>(null);
   const [db, setDb] = useState<Firestore | null>(null);
+  const [isFirebaseAvailable, setIsFirebaseAvailable] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && !getApps().length) {
-        console.log("Initializing Firebase with config:", {
-            apiKey: firebaseConfig.apiKey ? '***' : undefined, // Mask sensitive keys
-            authDomain: firebaseConfig.authDomain,
-            projectId: firebaseConfig.projectId,
-            storageBucket: firebaseConfig.storageBucket,
-            messagingSenderId: firebaseConfig.messagingSenderId,
-            appId: firebaseConfig.appId,
-        });
+    // Attempt to get Firebase config from expo-constants extra
+    const firebaseConfig = Constants.expoConfig?.extra;
 
-        // Basic validation
-        if (!firebaseConfig.projectId) {
-            console.error("Firebase projectId is missing in the configuration.");
-            return;
+    // Check if essential Firebase config values are present
+    const hasFirebaseConfig =
+      firebaseConfig?.firebaseProjectId &&
+      firebaseConfig?.firebaseApiKey &&
+      firebaseConfig?.firebaseAppId; // Add other essential checks if needed
+
+    if (hasFirebaseConfig) {
+        console.log("Firebase config found in Constants:", {
+             projectId: firebaseConfig.firebaseProjectId,
+             apiKey: firebaseConfig.firebaseApiKey ? '***' : 'MISSING',
+             // Add other relevant keys for debugging if needed
+         });
+      if (typeof window !== 'undefined' && !getApps().length) {
+        // Initialize only on the client and if not already initialized
+        try {
+          const firebaseAppInstance = initializeApp({
+                apiKey: firebaseConfig.firebaseApiKey,
+                authDomain: firebaseConfig.firebaseAuthDomain,
+                projectId: firebaseConfig.firebaseProjectId,
+                storageBucket: firebaseConfig.firebaseStorageBucket,
+                messagingSenderId: firebaseConfig.firebaseMessagingSenderId,
+                appId: firebaseConfig.firebaseAppId,
+            });
+          const firestoreDb = getFirestore(firebaseAppInstance);
+          setApp(firebaseAppInstance);
+          setDb(firestoreDb);
+          setIsFirebaseAvailable(true); // Set availability flag
+          console.log('Firebase initialized successfully.');
+        } catch (error) {
+          console.error('Firebase initialization error:', error);
+          setIsFirebaseAvailable(false); // Ensure flag is false on error
         }
-         if (!firebaseConfig.apiKey) {
-            console.error("Firebase apiKey is missing in the configuration.");
-            return;
-        }
-
-
-      try {
-        const firebaseApp = initializeApp(firebaseConfig);
-        const firestoreDb = getFirestore(firebaseApp);
-        setApp(firebaseApp);
-        setDb(firestoreDb);
-        console.log('Firebase initialized successfully.');
-      } catch (error) {
-        console.error('Firebase initialization error:', error);
+      } else if (getApps().length) {
+        // Use existing app instance if already initialized (e.g., HMR)
+        const existingApp = getApps()[0];
+        setApp(existingApp);
+        setDb(getFirestore(existingApp));
+        setIsFirebaseAvailable(true);
+        console.log('Using existing Firebase app instance.');
       }
-    } else if (getApps().length) {
-      // If already initialized (e.g., due to HMR), use the existing instance
-      const existingApp = getApps()[0];
-      setApp(existingApp);
-      setDb(getFirestore(existingApp));
-      console.log('Using existing Firebase app instance.');
+    } else {
+      console.warn('Firebase configuration not found in expo-constants. Firebase features (like notifications) will be unavailable.');
+      setIsFirebaseAvailable(false); // Mark Firebase as unavailable
     }
-  }, []);
+  }, []); // Run only once on mount
 
   return (
-    <FirebaseContext.Provider value={{ app, db }}>
+    <FirebaseContext.Provider value={{ app, db, isFirebaseAvailable }}>
       {children}
     </FirebaseContext.Provider>
   );
