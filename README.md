@@ -17,7 +17,7 @@ This is a React Native application built with Expo to track product inventory. I
 *   **Tab Navigation:** Simple navigation between Scan, Products (Local List), and Notifications (Firebase List) screens using Expo Router.
 *   **Pull-to-Refresh:** Refresh product and notification lists.
 *   **Toast Notifications:** User feedback for success and error messages using `react-native-toast-message`.
-*   **Improved UI:** More polished UI elements, loading states, and error handling.
+*   **UI:** Built with standard React Native components and StyleSheet.
 
 ## Getting Started
 
@@ -59,7 +59,7 @@ This is a React Native application built with Expo to track product inventory. I
           }
         }
         ```
-    *   Add a **Web app** to your Firebase project (even though it's a mobile app, we use the Web SDK).
+    *   Add a **Web app** to your Firebase project (even though it's a mobile app, we use the Web SDK configuration format).
     *   Copy your Firebase configuration credentials (apiKey, authDomain, projectId, etc.).
     *   Open `app.json` in the project root.
     *   Find the `extra` section and replace the placeholder values (`"YOUR_..."`) with your actual Firebase project credentials. Make sure all keys are filled.
@@ -90,8 +90,8 @@ This is a React Native application built with Expo to track product inventory. I
     *   Scan the QR code.
 *   **On an emulator/simulator:**
     *   Press `a` for Android or `i` for iOS in the terminal where Expo is running.
-*   **In a web browser:**
-    *   Press `w` in the terminal (Web support might have limitations, especially with native features like the camera).
+*   **In a web browser (Experimental):**
+    *   Press `w` in the terminal. Web support might have limitations, especially with native features like the camera and local storage persistence models. The primary focus is iOS and Android.
 
 ## Project Structure
 
@@ -111,9 +111,11 @@ stocktrack-expo/
 │   │   ├── firebase/        # Firebase interaction (firestore.ts)
 │   │   └── local-storage.ts # AsyncStorage interaction
 │   └── providers/           # React Context providers (FirebaseProvider)
+├── .eslintrc.js           # ESLint configuration
 ├── .gitignore
 ├── app.json                 # Expo configuration file
 ├── babel.config.js          # Babel configuration
+├── expo-env.d.ts            # Expo TypeScript environment types
 ├── metro.config.js          # Metro bundler configuration
 ├── package.json             # Project dependencies and scripts
 ├── tsconfig.json            # TypeScript configuration
@@ -137,21 +139,21 @@ stocktrack-expo/
 
 ## How Data Sync Works
 
-1.  **Local First:** When scanning or adding manually, data is *always* saved to local AsyncStorage first. This provides immediate feedback and ensures offline functionality for adding/viewing products.
+1.  **Local First:** When scanning or adding manually, data is *always* saved to local AsyncStorage first using `@react-native-async-storage/async-storage`. This provides immediate feedback and ensures offline functionality for adding/viewing products.
 2.  **Firebase Sync (if configured & available):**
     *   After a successful local save, the app attempts to save/update the same product data in Firebase Firestore using `setDoc` with `{ merge: true }`.
     *   If Firebase sync fails, an error message indicates this, but the local data remains saved.
 3.  **Decrement Logic (`usePeriodicSync` Hook):**
-    *   This hook runs periodically (e.g., every 15 mins for local, 60 mins for Firebase) *and* when the app comes to the foreground.
+    *   This hook runs periodically (e.g., every 15 mins for local, 60 mins for Firebase) *and* when the app comes to the foreground (using React Native `AppState`).
     *   **Local:** It first calculates and updates quantities in local storage based on `consumptionRate` and `lastDecremented` time.
-    *   **Firebase (if available):** It then triggers a similar check on Firestore data via the `decrementQuantities` function in `firestore.ts`. This function also updates the corresponding local product if a Firebase decrement occurs.
+    *   **Firebase (if available):** It then triggers a similar check on Firestore data via the `decrementQuantities` function in `firestore.ts`. This function also attempts to update the corresponding local product if a Firebase decrement occurs.
 4.  **Notifications (Firebase-dependent):**
     *   Low stock checks (`checkLowStock`) are performed in Firestore *after* a product is added/updated in Firebase or during the Firebase `decrementQuantities` process.
     *   Notifications are generated/updated/deleted directly in the `notifications` collection in Firestore based on stock levels and acknowledged status.
     *   The Notifications tab fetches *only* from Firestore (`getLowStockNotifications`), showing active (unacknowledged) alerts. Acknowledging updates the document in Firestore.
 5.  **Data Viewing:**
     *   The "Products" tab displays data fetched *only* from local AsyncStorage (`getAllProducts`).
-    *   The "Notifications" tab displays data fetched *only* from Firebase Firestore (`getLowStockNotifications`).
+    *   The "Notifications" tab displays data fetched *only* from Firebase Firestore (`getLowStockNotifications`), assuming Firebase is configured and available.
 
 ## Potential Improvements / TODO
 
@@ -163,4 +165,4 @@ stocktrack-expo/
 *   **UI/UX:** Further polish the UI, add animations, improve form validation feedback.
 *   **Testing:** Add unit and integration tests.
 *   **Settings Screen:** Allow configuration of `LOW_STOCK_THRESHOLD`, sync intervals, etc.
-*   **Web Compatibility:** Improve camera handling and storage fallback for better web support if needed.
+*   **Web Compatibility:** Further investigate and improve camera handling and storage fallback for better web support if desired.

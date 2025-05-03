@@ -7,17 +7,18 @@
         "./src/*"
       ]
     },
-    "jsx": "react-native",
+    "jsx": "react-native", // Ensure JSX is set for React Native
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+     "moduleResolution": "node" // Often needed for compatibility
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
     ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "expo-env.d.ts" // Include Expo environment types
   ],
   "exclude": [
-    "node_modules"
+    "node_modules" // Exclude node_modules
   ]
 }

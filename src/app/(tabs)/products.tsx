@@ -1,101 +1,120 @@
 import React from 'react';
 import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl, TouchableOpacity, Alert } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getAllProducts, removeProduct, type Product } from '@/lib/local-storage'; // Use local storage functions
-import { Ionicons } from '@expo/vector-icons'; // For icons
-import Toast from 'react-native-toast-message';
-import { useFirebase } from '@/providers/firebase-provider'; // To potentially invalidate Firebase cache on local delete
+import { getAllProducts, removeProduct, type Product } from '@/lib/local-storage'; // Use local storage functions ONLY
+import { Ionicons } from '@expo/vector-icons'; // Icons
+import Toast from 'react-native-toast-message'; // Feedback toasts
+import { useFirebase } from '@/providers/firebase-provider'; // Import to potentially invalidate Firebase cache if needed
 
-const LOW_STOCK_THRESHOLD = 10; // Define low stock threshold for UI indication
+const LOW_STOCK_THRESHOLD = 10; // Threshold for highlighting low stock quantity
 
 export default function ProductsScreen() {
-    const queryClient = useQueryClient();
-    const { isFirebaseAvailable } = useFirebase();
+    const queryClient = useQueryClient(); // React Query client
+    const { isFirebaseAvailable } = useFirebase(); // Check Firebase status (used for cache invalidation only)
 
-    // Query to get products from local storage
+    // --- React Query to fetch products from Local Storage ---
     const { data: products, isLoading, error, refetch, isRefetching } = useQuery<Product[]>({
-        queryKey: ['localProducts'], // Unique key for local storage data
-        queryFn: getAllProducts,
-        staleTime: 1 * 60 * 1000, // Keep data fresh for 1 minute
-        // Refetch interval might be excessive if data only changes via user action
-        // refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes in background
+        queryKey: ['localProducts'], // Unique key for local storage product data
+        queryFn: getAllProducts, // Function to fetch from AsyncStorage
+        staleTime: 1 * 60 * 1000, // Data considered fresh for 1 minute
+        // refetchInterval: 5 * 60 * 1000, // Optional: Refetch periodically in background
     });
 
-     // Mutation to delete a product from local storage
+     // --- React Query Mutation to delete a product from Local Storage ---
     const deleteMutation = useMutation({
-        mutationFn: removeProduct, // Function to call for deletion
+        mutationFn: removeProduct, // Function to call from local-storage.ts
         onSuccess: (data, productId) => {
+            // Show success feedback
             Toast.show({
-                type: 'info',
+                type: 'info', // Use 'info' type for deletion confirmation
                 text1: 'Product Removed',
-                text2: `Product with ID ${productId} removed locally.`,
+                text2: `Product "${productId}" removed from local storage.`, // Provide ID
                 position: 'bottom',
             });
-            // Invalidate local cache
+            // Invalidate the local product list cache to refresh the UI
             queryClient.invalidateQueries({ queryKey: ['localProducts'] });
 
-            // If Firebase is available, also invalidate its product cache,
-            // as the source of truth (local) has changed.
-            // A separate action would be needed to delete from Firebase itself.
+            // OPTIONAL: If Firebase is used, deleting locally might mean we *also* want
+            // to invalidate the Firebase cache, assuming a full sync mechanism isn't
+            // immediately deleting from Firebase too. This prevents potentially stale
+            // data showing up elsewhere if the user navigates quickly.
+            // A more robust solution would involve syncing the delete action to Firebase.
             if (isFirebaseAvailable) {
+                // Invalidate Firebase products query
                 queryClient.invalidateQueries({ queryKey: ['products'] });
-                // Also invalidate notifications as the product is gone
+                // Invalidate Firebase notifications query (as the product is gone)
                 queryClient.invalidateQueries({ queryKey: ['notifications'] });
+                console.log("Invalidated Firebase products/notifications cache due to local delete.");
             }
         },
         onError: (error: any, productId) => {
+            // Show error feedback
             Toast.show({
                 type: 'error',
                 text1: 'Deletion Failed',
-                text2: error.message || `Could not remove product ${productId}.`,
+                text2: error.message || `Could not remove product ${productId} locally.`,
                  position: 'bottom',
             });
         },
     });
 
+    // --- Event Handlers ---
+
+    // Shows a confirmation dialog before deleting a product
     const handleDelete = (id: string, name: string) => {
         Alert.alert(
-            "Confirm Deletion",
-            `Are you sure you want to remove "${name}" (ID: ${id}) from local storage? This action doesn't remove it from Firebase sync (if enabled).`, // Clarify local-only delete
+            "Confirm Deletion", // Alert Title
+             // Alert Message - clarify it's a local delete only
+            `Remove "${name}" (ID: ${id}) from local storage?\n\nThis action ONLY removes the item from this device's storage. It does NOT automatically remove it from Firebase sync (if enabled).`,
             [
-                { text: "Cancel", style: "cancel" },
-                { text: "Delete Locally", style: "destructive", onPress: () => deleteMutation.mutate(id) }
+                // Buttons
+                { text: "Cancel", style: "cancel" }, // Does nothing on cancel
+                {
+                    text: "Delete Locally",
+                    style: "destructive", // iOS red text for destructive action
+                    onPress: () => deleteMutation.mutate(id) // Trigger mutation on confirm
+                }
             ],
-            { cancelable: true }
+            { cancelable: true } // Allow dismissing by tapping outside on Android
         );
     };
 
+    // --- Helper Functions ---
 
+    // Formats the consumption rate object into a readable string
     const formatConsumptionRate = (rate: Product['consumptionRate']) => {
         if (!rate || typeof rate !== 'object' || !rate.amount || !rate.unit) return 'N/A';
         return `${rate.amount} / ${rate.unit}`;
     };
 
+    // Formats ISO date strings from local storage into readable format
     const formatTimestamp = (timestamp: Product['lastUpdated'] | Product['lastDecremented']): string => {
         if (!timestamp) return 'N/A';
         try {
-            // Assuming timestamp is an ISO string from local storage
+            // Assume timestamp is an ISO 8601 string
             const date = new Date(timestamp as string);
+            // Check if parsing resulted in a valid date
             if (isNaN(date.getTime())) {
                 return 'Invalid Date';
             }
-            return date.toLocaleString(); // Simple localized format
+            return date.toLocaleString(); // Use locale-specific date/time format
         } catch (e) {
             console.error("Error formatting timestamp:", e, "Value:", timestamp);
             return 'Error';
         }
     };
 
-
+    // --- Render Function for Each Product Item in the FlatList ---
     const renderProductItem = ({ item }: { item: Product }) => (
         <View style={styles.itemContainer}>
-            {/* Product Info Section */}
+            {/* Left side: Product Information */}
             <View style={styles.itemInfo}>
                 <Text style={styles.itemName}>{item.name}</Text>
                 <Text style={styles.itemDetail}>ID: {item.id}</Text>
                 <Text style={styles.itemDetail}>
                     Rate: {formatConsumptionRate(item.consumptionRate)}
                 </Text>
+                {/* Display timestamps if available */}
                 <Text style={styles.itemDetailSmall}>
                     Updated: {formatTimestamp(item.lastUpdated)}
                 </Text>
@@ -106,14 +125,18 @@ export default function ProductsScreen() {
                  )}
             </View>
 
-            {/* Actions (Quantity & Delete) Section */}
+            {/* Right side: Quantity Badge and Delete Button */}
              <View style={styles.actionsContainer}>
-                {/* Quantity Badge */}
+                {/* Quantity Badge - styled differently based on stock level */}
                 <View style={[
                     styles.quantityBadge,
+                    // Apply low stock style if quantity is below threshold
                     item.quantity < LOW_STOCK_THRESHOLD ? styles.lowStockBadge : styles.normalStockBadge
                 ]}>
-                    <Text style={item.quantity < LOW_STOCK_THRESHOLD ? styles.lowStockText : styles.normalStockText}>
+                    <Text style={
+                        // Apply different text style for low stock
+                        item.quantity < LOW_STOCK_THRESHOLD ? styles.lowStockText : styles.normalStockText
+                    }>
                         {item.quantity}
                     </Text>
                 </View>
@@ -121,19 +144,24 @@ export default function ProductsScreen() {
                  <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={() => handleDelete(item.id, item.name)}
+                    // Disable button if delete mutation is pending for *this specific item*
                     disabled={deleteMutation.isPending && deleteMutation.variables === item.id}
                 >
-                     {deleteMutation.isPending && deleteMutation.variables === item.id ? (
-                        <ActivityIndicator size="small" color="#ef4444" /> // Use red color for spinner too
+                     {/* Show activity indicator or trash icon */}
+                     {(deleteMutation.isPending && deleteMutation.variables === item.id) ? (
+                        <ActivityIndicator size="small" color="#ef4444" /> // Red spinner
                      ) : (
-                        <Ionicons name="trash-bin-outline" size={22} color="#ef4444" /> // Slightly larger icon, red color
+                        <Ionicons name="trash-bin-outline" size={22} color="#ef4444" /> // Red trash icon
                      )}
                  </TouchableOpacity>
              </View>
         </View>
     );
 
-    // --- Loading and Error States ---
+    // --- Render Logic Based on Query State ---
+
+    // 1. Initial Loading State
+    // Avoid showing loading indicator during background refetches
     if (isLoading && !isRefetching) {
         return (
             <View style={styles.centered}>
@@ -143,12 +171,15 @@ export default function ProductsScreen() {
         );
     }
 
+    // 2. Error State
     if (error) {
         return (
             <View style={styles.centered}>
                 <Ionicons name="alert-circle-outline" size={40} color="#b91c1c" style={styles.errorIcon}/>
-                <Text style={styles.errorText}>Error loading local products</Text>
-                <Text style={styles.errorDetails}>{(error as Error).message}</Text>
+                <Text style={styles.errorText}>Error Loading Local Products</Text>
+                 {/* Display error message */}
+                <Text style={styles.errorDetails}>{(error as Error).message || 'An unknown error occurred.'}</Text>
+                 {/* Retry Button */}
                 <TouchableOpacity style={[styles.button, styles.retryButton]} onPress={() => refetch()}>
                      <Ionicons name="refresh-outline" size={18} color="#fff" />
                      <Text style={styles.buttonText}>Try Again</Text>
@@ -157,171 +188,199 @@ export default function ProductsScreen() {
         );
     }
 
+    // 3. Empty State (No products found locally)
     if (!products || products.length === 0) {
+         // Wrap empty state in RefreshControl for consistency
         return (
-            <View style={styles.centered}>
-                <Ionicons name="file-tray-stacked-outline" size={50} color="#9ca3af" style={styles.emptyIcon} />
-                <Text style={styles.emptyText}>No products stored locally.</Text>
-                <Text style={styles.emptySubText}>Scan a QR code or add items manually on the Scan tab.</Text>
-                 <TouchableOpacity style={[styles.button, styles.primaryButton]} onPress={() => refetch()}>
-                     <Ionicons name="refresh-outline" size={18} color="#fff" />
-                     <Text style={styles.buttonText}>Refresh</Text>
-                 </TouchableOpacity>
-            </View>
+             <RefreshControl
+                refreshing={isRefetching}
+                onRefresh={refetch}
+                colors={["#006400"]}
+                tintColor={"#006400"}
+             >
+                <View style={styles.centeredEmpty}>
+                    <Ionicons name="file-tray-stacked-outline" size={50} color="#9ca3af" style={styles.emptyIcon} />
+                    <Text style={styles.emptyText}>No Products Stored Locally</Text>
+                    <Text style={styles.emptySubText}>Scan a QR code or add items manually on the 'Scan' tab to get started.</Text>
+                    {/* Optional: Add a refresh button even when empty */}
+                    {/* <TouchableOpacity style={[styles.button, styles.primaryButton]} onPress={() => refetch()}>
+                        <Ionicons name="refresh-outline" size={18} color="#fff" />
+                        <Text style={styles.buttonText}>Refresh</Text>
+                    </TouchableOpacity> */}
+                     <Text style={styles.emptySubTextSmall}>(Pull down to refresh)</Text>
+                </View>
+             </RefreshControl>
         );
     }
 
-    // --- Product List ---
+    // 4. Success State (Products found, display list)
     return (
         <FlatList
-            data={[...products].sort((a, b) => a.name.localeCompare(b.name))} // Sort a copy alphabetically by name
-            renderItem={renderProductItem}
-            keyExtractor={(item) => item.id}
-            style={styles.list}
-            contentContainerStyle={styles.listContentContainer}
-            refreshControl={ // Add pull-to-refresh
+            // Sort a *copy* of the products array alphabetically by name for display
+            data={[...products].sort((a, b) => a.name.localeCompare(b.name))}
+            renderItem={renderProductItem} // Function to render each item
+            keyExtractor={(item) => item.id} // Use product ID as unique key
+            style={styles.list} // Styles for the list container
+            contentContainerStyle={styles.listContentContainer} // Inner content styles
+            // Add Pull-to-Refresh capability
+            refreshControl={
                 <RefreshControl
-                    refreshing={isRefetching}
-                    onRefresh={refetch}
-                    colors={["#006400"]} // Spinner color for Android
-                    tintColor={"#006400"} // Spinner color for iOS
+                    refreshing={isRefetching} // Show spinner if refetching in background
+                    onRefresh={refetch} // Function to call on pull
+                    colors={["#006400"]} // Android spinner color (dark green)
+                    tintColor={"#006400"} // iOS spinner color (dark green)
                 />
             }
         />
     );
 }
 
+// --- Styles ---
 const styles = StyleSheet.create({
-    centered: {
+    centered: { // Style for full-screen centered content (loading, error)
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         padding: 20,
-        backgroundColor: '#f0f2f5', // Consistent background
+        backgroundColor: '#f0f2f5', // Consistent light background
     },
-    list: {
+    centeredEmpty: { // Style for centered content within the scrollable area (empty list)
+        flexGrow: 1, // Allow it to grow
+        minHeight: 300, // Ensure visibility
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+        backgroundColor: '#f0f2f5',
+     },
+    list: { // Style for the FlatList container
         flex: 1,
-        backgroundColor: '#f0f2f5', // Background for the list area
+        backgroundColor: '#f0f2f5',
     },
-    listContentContainer: {
+    listContentContainer: { // Inner container style for FlatList content
         paddingVertical: 10,
         paddingHorizontal: 15,
-        paddingBottom: 30, // Add padding to bottom
+        paddingBottom: 30, // Space at the bottom
+        flexGrow: 1, // Important for centering empty state when content is short
     },
-    itemContainer: {
+    itemContainer: { // Style for each product item row
         backgroundColor: '#ffffff',
         paddingVertical: 15,
         paddingHorizontal: 15,
-        marginBottom: 12, // Slightly more space
-        borderRadius: 10, // Slightly more rounded
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        shadowColor: "#000",
+        marginBottom: 12,
+        borderRadius: 10,
+        flexDirection: 'row', // Arrange info and actions horizontally
+        justifyContent: 'space-between', // Push info and actions apart
+        alignItems: 'center', // Align items vertically centered
+        shadowColor: "#000", // iOS shadow
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 2.00,
-        elevation: 2,
+        elevation: 2, // Android shadow
     },
-    itemInfo: {
-        flex: 1, // Take available space
-        marginRight: 10, // Space before actions
+    itemInfo: { // Container for text info on the left
+        flex: 1, // Allow text to take available space
+        marginRight: 10, // Space before actions container
     },
-    itemName: {
-        fontSize: 17, // Slightly larger name
-        fontWeight: '600', // Medium weight
+    itemName: { // Style for product name
+        fontSize: 17,
+        fontWeight: '600',
         marginBottom: 5,
-        color: '#1f2937', // Darker text
+        color: '#1f2937', // Dark text
     },
-    itemDetail: {
+    itemDetail: { // Style for ID, Rate text
         fontSize: 14,
-        color: '#4b5563', // Gray-600
+        color: '#4b5563',
         marginBottom: 3,
-        lineHeight: 18, // Improve readability
+        lineHeight: 18,
     },
-    itemDetailSmall: {
+    itemDetailSmall: { // Style for timestamp text
         fontSize: 12,
-        color: '#6b7280', // Gray-500
+        color: '#6b7280',
         marginTop: 2,
          lineHeight: 16,
     },
-    actionsContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
+    actionsContainer: { // Container for quantity badge and delete button on the right
+        flexDirection: 'row', // Arrange badge and button horizontally
+        alignItems: 'center', // Align badge and button vertically centered
     },
-    quantityBadge: {
-        paddingVertical: 5, // Slightly more vertical padding
-        paddingHorizontal: 12, // Slightly more horizontal padding
-        borderRadius: 16, // More rounded pill shape
-        minWidth: 50, // Ensure minimum width for badge consistency
+    quantityBadge: { // Base style for the quantity display badge
+        paddingVertical: 5,
+        paddingHorizontal: 12,
+        borderRadius: 16, // Pill shape
+        minWidth: 50, // Consistent minimum width
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 12, // More space between badge and delete button
+        marginRight: 12, // Space between badge and delete button
         borderWidth: 1, // Add border to all badges
     },
-    lowStockBadge: {
+    lowStockBadge: { // Style applied when stock is low
         backgroundColor: '#fef2f2', // Light red background
         borderColor: '#fca5a5', // Red border
     },
-    normalStockBadge: {
+    normalStockBadge: { // Style applied when stock is normal
         backgroundColor: '#f3f4f6', // Light gray background
         borderColor: '#d1d5db', // Gray border
     },
-     lowStockText: {
+     lowStockText: { // Text style within the low stock badge
         fontWeight: 'bold',
         fontSize: 14,
-        color: '#b91c1c', // Dark red text for low stock
+        color: '#b91c1c', // Dark red text
     },
-    normalStockText: {
+    normalStockText: { // Text style within the normal stock badge
         fontWeight: 'bold',
         fontSize: 14,
-         color: '#374151', // Dark gray text for normal stock
+         color: '#374151', // Dark gray text
    },
-    deleteButton: {
-        padding: 8, // Make hit area larger
-         // backgroundColor: '#fee2e2', // Optional light red background on press
-         borderRadius: 20,
+    deleteButton: { // Style for the delete button (touchable area)
+        padding: 8, // Increase touchable area around the icon
+         borderRadius: 20, // Circular background/hit area
     },
-    loadingText: {
+    loadingText: { // Text shown during loading
         marginTop: 10,
         fontSize: 16,
         color: '#4b5563',
     },
-    errorIcon: {
+    errorIcon: { // Icon used in error state
          marginBottom: 15,
     },
-    errorText: {
-        color: '#b91c1c', // Darker red
+    errorText: { // Main error message text
+        color: '#b91c1c',
         fontSize: 18,
         fontWeight: '600',
         textAlign: 'center',
         marginBottom: 5,
     },
-     errorDetails: {
-        color: '#dc2626', // Lighter red
+     errorDetails: { // Secondary error details text
+        color: '#dc2626',
         fontSize: 14,
         textAlign: 'center',
         marginBottom: 20,
-        paddingHorizontal: 10, // Add padding to prevent long lines
+        paddingHorizontal: 10,
     },
-    emptyIcon: {
+    emptyIcon: { // Icon used in empty state
          marginBottom: 15,
     },
-    emptyText: {
+    emptyText: { // Main text for empty state
         fontSize: 18,
         fontWeight: '500',
         color: '#4b5563',
         textAlign: 'center',
         marginBottom: 10,
     },
-    emptySubText: {
+    emptySubText: { // Sub-text for empty state
         fontSize: 14,
         color: '#6b7280',
         textAlign: 'center',
         marginBottom: 25,
-        paddingHorizontal: 20, // Prevent long lines
+        paddingHorizontal: 20,
     },
-     button: {
+    emptySubTextSmall: { // Smaller sub-text (e.g., pull down to refresh)
+       fontSize: 12,
+       color: '#9ca3af',
+       textAlign: 'center',
+       marginTop: 5,
+   },
+     button: { // Base style for buttons like Retry
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -333,15 +392,15 @@ const styles = StyleSheet.create({
       shadowOpacity: 0.1,
       shadowRadius: 2,
       elevation: 2,
-      marginTop: 10, // Space above button
+      marginTop: 10,
   },
-   primaryButton: {
-      backgroundColor: '#006400', // Dark Green
+   primaryButton: { // Style not used on this screen currently, but defined for consistency
+      backgroundColor: '#006400',
    },
-   retryButton: {
-        backgroundColor: '#b91c1c', // Red-700
+   retryButton: { // Style for the Try Again button in error state
+        backgroundColor: '#b91c1c', // Red
    },
-   buttonText: {
+   buttonText: { // Text inside buttons like Try Again
        color: '#ffffff',
        marginLeft: 8,
        fontSize: 15,

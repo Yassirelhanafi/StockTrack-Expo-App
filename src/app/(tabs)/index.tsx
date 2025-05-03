@@ -3,17 +3,20 @@ import { View, Text, StyleSheet, Alert, TextInput, Platform, ScrollView, Touchab
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
-import { addProduct as addFirebaseProduct, type Product as FirebaseProduct } from '@/lib/firebase/firestore'; // Firebase add
-import { storeProduct, type Product as LocalProduct } from '@/lib/local-storage'; // Import local storage functions
-import { Ionicons } from '@expo/vector-icons';
-import { useFirebase } from '@/providers/firebase-provider'; // To check Firebase availability
+import { addProduct as addFirebaseProduct, type Product as FirebaseProduct } from '@/lib/firebase/firestore'; // Firebase add function
+import { storeProduct, type Product as LocalProduct } from '@/lib/local-storage'; // Local storage functions
+import { Ionicons } from '@expo/vector-icons'; // Icons
+import { useFirebase } from '@/providers/firebase-provider'; // Hook to check Firebase availability
 
-// Regex fixed to handle escaping and proper grouping
+// Regex for parsing consumption rate strings (e.g., "5 per day")
+// Allows number, space(s), "per", "every", or "/", space(s), unit (day/week/month)
+// Added escape for '/'
 const CONSUMPTION_RATE_REGEX = /^(\d+)\s*(?:per|every|\/)\s*(day|week|month)$/i;
+
 const LOW_STOCK_THRESHOLD = 10; // Define a threshold for low stock alerts
 
 
-// Use a type that works for both local and Firebase
+// Interface for product data used within this component
 interface ProductData {
   id: string;
   name: string;
@@ -22,44 +25,48 @@ interface ProductData {
     amount: number;
     unit: 'day' | 'week' | 'month';
   };
-  // Timestamps handled appropriately before saving to respective stores
+  // Timestamps (lastUpdated, lastDecremented) are added right before saving
 }
 
 
 export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<ProductData | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false); // Loading indicator for processing
+  const [scanned, setScanned] = useState(false); // Flag to prevent multiple scans from one QR code
+  const [isScanning, setIsScanning] = useState(false); // Controls if the camera view is active
+  const [scanResult, setScanResult] = useState<ProductData | null>(null); // Stores parsed QR data
+  const [errorMessage, setErrorMessage] = useState<string | null>(null); // Displays errors
+  const [isProcessing, setIsProcessing] = useState(false); // Loading indicator for saving data
 
 
+  // State for manual entry form
   const [manualId, setManualId] = useState('');
   const [manualName, setManualName] = useState('');
   const [manualQuantity, setManualQuantity] = useState('');
   const [manualRate, setManualRate] = useState('');
 
-  const queryClient = useQueryClient();
-  const { isFirebaseAvailable } = useFirebase(); // Get Firebase status
+  const queryClient = useQueryClient(); // React Query client for cache invalidation
+  const { isFirebaseAvailable } = useFirebase(); // Get Firebase status from provider
 
 
-   // --- Mutation to handle adding/updating product (both local and Firebase) ---
+   // --- React Query Mutation for saving product data ---
+   // Handles saving to local storage first, then optionally to Firebase
    const mutation = useMutation({
     mutationFn: async (product: ProductData) => {
-        setIsProcessing(true); // Start loading indicator
+        setIsProcessing(true); // Show loading indicator
         const now = new Date();
 
-        const productForLocal: LocalProduct = { // Type for Local Storage
+        // 1. Prepare data for Local Storage (uses ISO strings for dates)
+        const productForLocal: LocalProduct = {
             id: product.id,
             name: product.name,
             quantity: product.quantity,
             consumptionRate: product.consumptionRate,
-            lastUpdated: now.toISOString(), // Use ISO string for local
+            lastUpdated: now.toISOString(),
+            // Set initial lastDecremented time if rate exists, otherwise undefined
             lastDecremented: product.consumptionRate ? now.toISOString() : undefined,
         };
 
-         // Prepare Firebase data only if available
+         // 2. Prepare Firebase data only if Firebase is available (uses Date objects)
          let productForFirebase: (Omit<FirebaseProduct, 'lastUpdated' | 'lastDecremented'> & { lastUpdated: Date, lastDecremented?: Date }) | null = null;
          if (isFirebaseAvailable) {
               productForFirebase = {
@@ -67,156 +74,175 @@ export default function ScanScreen() {
                  name: product.name,
                  quantity: product.quantity,
                  consumptionRate: product.consumptionRate,
-                 lastUpdated: now, // Use Date object for Firebase
+                 lastUpdated: now, // Use Date object for Firebase Timestamp conversion later
                  lastDecremented: product.consumptionRate ? now : undefined,
              };
          }
 
 
         try {
-            // 1. Update local storage first (always do this)
+            // A. Save to Local Storage (Mandatory first step)
             await storeProduct(productForLocal);
             console.log('Product stored locally:', product.id);
 
-            // 2. Attempt to add/update in Firebase (if available and configured)
+            // B. Attempt to save to Firebase (Optional step)
             let firebaseError = null;
             if (productForFirebase) {
                  try {
-                    await addFirebaseProduct(productForFirebase); // Use renamed function
+                    // addFirebaseProduct handles setDoc with merge: true
+                    await addFirebaseProduct(productForFirebase);
                     console.log('Product added/updated in Firebase:', product.id);
                  } catch (fbError: any) {
                      console.error("Firebase sync failed:", fbError);
-                     firebaseError = fbError; // Store error to report later
-                     // addFirebaseProduct uses setDoc merge, so no need for separate updateQuantity call here
+                     firebaseError = fbError; // Store error to report it later
                  }
             } else {
                  console.log("Firebase not available or configured, skipping Firebase sync.");
             }
 
+             // If Firebase sync failed, throw a specific error
              if (firebaseError) {
-                 // Throw an error that includes info about local success but Firebase failure
                  throw new Error(`Local save OK, but Firebase sync failed: ${firebaseError.message || 'Unknown Firebase error'}`);
              }
 
-            return product; // Return original product data for UI feedback
+            return product; // Return original product data on full success
         } catch (error: any) {
-            // This catches errors from local storage OR the re-thrown Firebase error
+            // Catch errors from local storage OR the re-thrown Firebase error
             console.error("Error processing product mutation:", error);
-            // Ensure the error message clearly indicates what failed
-            if (error.message.startsWith('Local save OK')) {
-                 throw error; // Re-throw the specific Firebase sync error
-            } else {
-                 // Assume local storage failed
-                 throw new Error(`Failed to save product locally: ${error.message || 'Unknown error'}`);
-            }
+            // Rethrow the error to be handled by onError
+            throw error;
         } finally {
-             setIsProcessing(false); // Stop loading indicator
+             setIsProcessing(false); // Stop loading indicator regardless of outcome
         }
     },
     onSuccess: (data) => {
+        // Show success toast
         Toast.show({
             type: 'success',
             text1: 'Success!',
             text2: `Product ${data.name} processed.`,
             position: 'bottom',
         });
-        // Invalidate local query first
+        // Invalidate local product list query cache
         queryClient.invalidateQueries({ queryKey: ['localProducts'] });
-        // Invalidate Firebase queries only if it was available
+        // Invalidate Firebase query caches ONLY if Firebase was involved
         if (isFirebaseAvailable) {
-            queryClient.invalidateQueries({ queryKey: ['products'] });
-            queryClient.invalidateQueries({ queryKey: ['notifications'] });
+            queryClient.invalidateQueries({ queryKey: ['products'] }); // Firebase product list
+            queryClient.invalidateQueries({ queryKey: ['notifications'] }); // Notifications might change
         }
+        // Reset UI state
         setScanResult(null);
         setScanned(false); // Allow scanning again
-        setIsScanning(false); // Stop scanning visually
-        clearManualForm(); // Clear manual form
+        setIsScanning(false); // Stop camera view
+        clearManualForm(); // Clear the manual entry form
     },
     onError: (error: any) => {
         console.error('Mutation error:', error);
-        let toastMessage = error?.message || 'Failed to process product.';
-        // Customize message based on the error content
-        if (error.message.startsWith('Local save OK')) {
+        // Determine the error message based on what failed
+        let toastMessage = 'Failed to process product.';
+        if (error.message?.startsWith('Local save OK')) {
+            // Specific error for Firebase failure after local success
             toastMessage = `Locally saved, but Firebase sync failed. Check connection/config.`;
-        } else if (error.message.startsWith('Failed to save product locally')) {
+        } else if (error.message?.includes('locally')) {
+            // Error likely from local storage save step
              toastMessage = `Failed to save product locally. Please try again.`;
         }
 
+        // Show error toast
         Toast.show({
             type: 'error',
             text1: 'Processing Error',
             text2: toastMessage,
-            visibilityTime: 6000, // Show longer for errors
+            visibilityTime: 6000, // Show errors longer
             position: 'bottom',
         });
-        setErrorMessage(`Error: ${toastMessage}`); // Show error message in UI
-        setScanResult(null); // Clear result on error
-        setScanned(false); // Allow scanning again
-        setIsScanning(false);
+        // Display error in the UI as well
+        setErrorMessage(`Error: ${toastMessage}`);
+        // Reset UI state partially (allow retrying)
+        setScanResult(null); // Clear result
+        setScanned(false); // Allow scanning/manual entry again
+        setIsScanning(false); // Stop camera view
     },
 });
 
 
+  // --- Helper Functions ---
+
+  // Parses a string like "5 per day" into the consumption rate object
   const parseConsumptionRate = (
     rateString: string
   ): ProductData['consumptionRate'] | undefined => {
-    if (!rateString) return undefined;
+    if (!rateString) return undefined; // Return undefined if string is empty
     const match = rateString.trim().match(CONSUMPTION_RATE_REGEX);
     if (match) {
       const amount = parseInt(match[1], 10);
-      const unit = match[2].toLowerCase() as 'day' | 'week' | 'month'; // Index 2 for the unit
+      // Type assertion is safe here due to regex group
+      const unit = match[3].toLowerCase() as 'day' | 'week' | 'month';
+      // Validate parsed amount and unit
       if (!isNaN(amount) && ['day', 'week', 'month'].includes(unit)) {
         return { amount, unit };
       }
     }
+    // Log warning and show toast if parsing fails
     console.warn(`Could not parse consumption rate: "${rateString}"`);
     Toast.show({
         type: 'error',
         text1: 'Invalid Rate Format',
-        text2: 'Use format like "5 per day", "10 / week" etc.',
+        text2: 'Use "5 per day", "10 / week", "1 / month"',
         visibilityTime: 4000,
         position: 'bottom',
     })
-    return undefined;
+    return undefined; // Return undefined on failure
   };
 
+   // Parses data from a scanned QR code (supports JSON or simple Key:Value)
    const parseQRCodeData = (decodedText: string): ProductData | null => {
+    setErrorMessage(null); // Clear previous errors
     try {
-        // Attempt to parse as JSON first
+        // Attempt 1: Parse as JSON
         const data = JSON.parse(decodedText);
+        // Validate required fields in JSON object
         if (data.id && data.name && typeof data.quantity === 'number') {
             const product: ProductData = {
                 id: String(data.id),
                 name: String(data.name),
                 quantity: data.quantity,
-                // Timestamps are not parsed from QR, set on save
             };
-            // Handle consumption rate parsing (string or object)
+            // Parse consumption rate if present (can be string or object in JSON)
             if (data.consumptionRate) {
                 if (typeof data.consumptionRate === 'string') {
                     product.consumptionRate = parseConsumptionRate(data.consumptionRate);
+                     // If rate string exists but fails parsing, return null
+                     if (product.consumptionRate === undefined) return null;
                 } else if (typeof data.consumptionRate === 'object' && data.consumptionRate.amount && data.consumptionRate.unit) {
-                     if (['day', 'week', 'month'].includes(data.consumptionRate.unit.toLowerCase())) {
-                        const amount = parseInt(data.consumptionRate.amount, 10);
-                        if(!isNaN(amount)) {
-                            product.consumptionRate = {
-                                amount: amount,
-                                unit: data.consumptionRate.unit.toLowerCase() as 'day' | 'week' | 'month'
-                            };
-                        }
-                    }
+                     const amount = parseInt(data.consumptionRate.amount, 10);
+                     const unit = String(data.consumptionRate.unit).toLowerCase();
+                     if (!isNaN(amount) && ['day', 'week', 'month'].includes(unit)) {
+                         product.consumptionRate = {
+                            amount: amount,
+                            unit: unit as 'day' | 'week' | 'month'
+                         };
+                     } else {
+                         console.warn("Invalid consumptionRate object in JSON:", data.consumptionRate);
+                         setErrorMessage('Invalid consumptionRate object in JSON.');
+                         return null; // Invalid rate object
+                     }
                 }
             }
-            return product;
+            return product; // Successfully parsed JSON
+        } else {
+             throw new Error("Missing required fields (id, name, quantity) in JSON.");
         }
     } catch (e) {
-        // If JSON parsing fails, try a simple delimited format
+        // Attempt 2: Parse as simple Key:Value string (e.g., "id:123,name:Thing,qty:10,rate:5 per day")
+        console.log("QR data is not valid JSON, attempting Key:Value parse...", e);
         const parts = decodedText.split(',');
-        const product: Partial<ProductData> & { id?: string; name?: string; quantity?: number } = {}; // Use Partial
+        const product: Partial<ProductData> & { id?: string; name?: string; quantity?: number } = {};
         let foundId = false, foundName = false, foundQty = false;
+        let rateParseError = false; // Flag for rate parsing issues
 
         parts.forEach((part) => {
-            const [key, ...valueParts] = part.split(':'); // Handle values with colons
+            const [key, ...valueParts] = part.split(':'); // Handle potential colons in value
             const value = valueParts.join(':').trim();
             if (key && value) {
                 const trimmedKey = key.trim().toLowerCase();
@@ -233,151 +259,173 @@ export default function ScanScreen() {
                         foundQty = true;
                     }
                 } else if (trimmedKey === 'rate' || trimmedKey === 'consumptionrate') {
-                    product.consumptionRate = parseConsumptionRate(value);
+                    const parsedRate = parseConsumptionRate(value);
+                    if (parsedRate === undefined) {
+                        // If rate key exists but parsing fails, mark error and stop
+                         rateParseError = true;
+                    }
+                     product.consumptionRate = parsedRate;
                 }
-                 // Timestamps are not parsed from QR
             }
         });
 
-        if (foundId && foundName && foundQty && product.id && product.name && product.quantity !== undefined) {
-             // Ensure required fields are present before casting
-            return {
-                ...product,
-                id: product.id,
-                name: product.name,
-                quantity: product.quantity,
-                // No timestamps here
-            } as ProductData;
+        // Validate Key:Value results
+        if (foundId && foundName && foundQty && product.id && product.name && product.quantity !== undefined && !rateParseError) {
+            // Required fields found and rate (if present) parsed correctly
+            return product as ProductData;
+        } else {
+            // If key:value parsing also failed or rate was invalid
+             console.error('Invalid QR code data format:', decodedText);
+             const baseError = 'Invalid QR format. Need JSON or "id:_,name:_,qty:_" format.';
+             const finalError = rateParseError ? `${baseError} Check rate format.` : baseError;
+             setErrorMessage(finalError);
+             Toast.show({
+                 type: 'error', text1: 'Invalid QR Code', text2: 'Format not recognized or invalid rate.',
+                 visibilityTime: 4000, position: 'bottom',
+             });
+             return null;
         }
     }
-
-    console.error('Invalid QR code data format:', decodedText);
-    setErrorMessage(
-      'Invalid QR code format. Expected JSON or "Key:Value,..." format with at least id, name, and quantity.'
-    );
-     Toast.show({
-        type: 'error',
-        text1: 'Invalid QR Code',
-        text2: 'Format not recognized.',
-        visibilityTime: 4000,
-        position: 'bottom',
-      });
-    return null;
   };
 
 
-  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
-    if (scanned || isProcessing) return; // Prevent processing multiple times
+  // --- Event Handlers ---
 
-    setScanned(true); // Mark as scanned immediately
-    setIsScanning(false); // Stop the visual scanning indicator
-    console.log(`Bar code with type ${type} and data ${data} has been scanned!`);
+  // Called when the CameraView detects a barcode
+  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+    // Prevent processing if already scanned/saving or not actively scanning
+    if (scanned || isProcessing || !isScanning) return;
+
+    setScanned(true); // Mark as scanned to prevent duplicates from same scan burst
+    setIsScanning(false); // Turn off camera view visually
+    console.log(`Barcode scanned: Type=${type}, Data=${data}`);
+
     const parsedData = parseQRCodeData(data);
+
     if (parsedData) {
-      setScanResult(parsedData);
-      setErrorMessage(null);
-      // Show confirmation alert immediately after successful parse
-      showConfirmationAlert(parsedData);
+      setScanResult(parsedData); // Store parsed data
+      setErrorMessage(null); // Clear any previous error message
+      showConfirmationAlert(parsedData); // Show confirmation dialog
     } else {
-      // Error message is set within parseQRCodeData
-       // Keep scanning available if parse fails
-       setScanned(false);
+      // Error message is set within parseQRCodeData if parsing fails
+       setScanned(false); // Allow scanning again immediately if parse failed
+       setIsScanning(true); // Optionally keep scanning if parse failed? Or require restart? Currently stops.
     }
   };
 
+   // Shows an Alert dialog to confirm the scanned/entered product details
    const showConfirmationAlert = (product: ProductData) => {
     let message = `ID: ${product.id}\nName: ${product.name}\nQuantity: ${product.quantity}`;
     if (product.consumptionRate) {
       message += `\nRate: ${product.consumptionRate.amount} per ${product.consumptionRate.unit}`;
     }
+    // Add a warning if the quantity is below the threshold
     if (product.quantity < LOW_STOCK_THRESHOLD) {
         message += "\n\nWarning: Low Stock!";
     }
 
     Alert.alert(
-      'Confirm Product',
-      message,
+      'Confirm Product', // Alert Title
+      message, // Alert Message (product details)
       [
-        { text: 'Cancel', style: 'cancel', onPress: () => { setScanResult(null); setScanned(false); setIsScanning(false); } }, // Reset on cancel
-        { text: 'Confirm', onPress: () => mutation.mutate(product) },
+        // Buttons
+        { text: 'Cancel', style: 'cancel', onPress: () => {
+            // Reset state if user cancels
+            setScanResult(null);
+            setScanned(false);
+            setIsScanning(false); // Ensure scanning stops
+            setErrorMessage(null);
+        }},
+        { text: 'Confirm & Save', onPress: () => mutation.mutate(product) }, // Trigger mutation on confirm
       ],
-      { cancelable: false }
+      { cancelable: false } // Prevent dismissing alert by tapping outside
     );
   };
 
 
+  // Initiates the scanning process
   const startScan = async () => {
+     // Check for camera permissions first
      if (!permission) {
+         // If permission state is somehow null, request it
         await requestPermission();
-        // Re-check permission after requesting
-        if (!permission?.granted) {
-           Toast.show({type: 'error', text1: 'Camera Permission Needed', position: 'bottom'});
-           return;
-        }
+        return; // Exit and let useEffect handle the change
      }
      if (!permission.granted) {
+         // If permission denied
          Toast.show({type: 'error', text1: 'Camera Permission Needed', position: 'bottom'});
          const canAskAgain = permission.canAskAgain;
          if(canAskAgain) {
-             requestPermission();
+             // Request permission again if possible
+             await requestPermission();
          } else {
-             // Guide user to settings
-             Alert.alert("Permission Required", "Camera permission is denied. Please enable it in your device settings.");
+             // Guide user to settings if permission permanently denied
+             Alert.alert(
+                "Permission Required",
+                "Camera permission is denied. Please enable it in your device settings to scan QR codes."
+            );
          }
-         return;
+         return; // Don't start scanning without permission
      }
+
+     // If permission granted, reset state and start scanning
     setScanResult(null);
     setErrorMessage(null);
-    setScanned(false); // Allow scanning again
-    setIsScanning(true);
+    setScanned(false); // Reset scanned flag
+    setIsScanning(true); // Activate camera view
   };
 
+   // Stops the scanning process
    const stopScan = () => {
-    setIsScanning(false);
-   // Don't reset scanned here, handleBarCodeScanned does that
+    setIsScanning(false); // Deactivate camera view
+   // Don't reset 'scanned' here, it's handled by handleBarCodeScanned or confirmation cancel
   };
 
+  // Handles the submission of the manual entry form
   const handleManualAdd = () => {
+     // Basic validation for required fields
      const quantityNum = parseInt(manualQuantity, 10);
-     if (!manualId.trim() || !manualName.trim() || isNaN(quantityNum)) {
-         Alert.alert("Validation Error", "Please fill in Product ID, Name, and a valid Quantity.");
+     if (!manualId.trim() || !manualName.trim() || isNaN(quantityNum) || quantityNum < 0) {
+         Alert.alert("Validation Error", "Please provide a unique Product ID, Name, and a valid non-negative Quantity.");
          return;
      }
 
+      // Parse consumption rate if provided
       let consumptionRate: ProductData['consumptionRate'] | undefined = undefined;
         if (manualRate.trim()) {
             consumptionRate = parseConsumptionRate(manualRate);
-            // If parsing fails but rate was entered, stop the process
+            // If rate was entered but failed parsing, stop the process (toast shown in parser)
             if (!consumptionRate) {
-                 // Toast is shown in parseConsumptionRate
                 return;
             }
         }
 
 
+      // Construct product data object from form inputs
       const productData: ProductData = {
         id: manualId.trim(),
         name: manualName.trim(),
         quantity: quantityNum,
-        consumptionRate: consumptionRate,
-        // Timestamps are set when saving
+        consumptionRate: consumptionRate, // Will be undefined if not entered/parsed
     };
 
-    setScanResult(productData); // Set result to trigger confirmation
+    // Show confirmation alert for manually entered data
+    setScanResult(productData); // Set result to potentially display details if needed
     showConfirmationAlert(productData);
   }
 
+   // Clears the manual entry form fields and error message
    const clearManualForm = () => {
         setManualId('');
         setManualName('');
         setManualQuantity('');
         setManualRate('');
-        setErrorMessage(null); // Also clear errors
+        setErrorMessage(null); // Also clear any validation errors displayed
    }
 
    // --- Render Logic ---
 
-  // Initial permission check (before granted/denied)
+  // State 1: Checking initial camera permission
   if (permission === null) {
     return (
          <View style={styles.centered}>
@@ -387,44 +435,56 @@ export default function ScanScreen() {
      );
   }
 
-  // Permission denied state
+  // State 2: Camera permission denied
   if (!permission.granted) {
     return (
       <View style={styles.centered}>
         <Ionicons name="camera-reverse-outline" size={50} color="#6b7280" style={{marginBottom: 15}} />
         <Text style={styles.permissionText}>Camera access is needed to scan QR codes.</Text>
+         {/* Button to re-request permission */}
         <TouchableOpacity style={[styles.button, styles.primaryButton]} onPress={startScan}>
+             <Ionicons name="refresh-outline" size={20} color="#fff" />
              <Text style={styles.buttonText}>Grant Permission</Text>
          </TouchableOpacity>
       </View>
     );
   }
 
-  // Permission granted, render the main screen
+  // State 3: Permission granted, render the main screen
   return (
-    <ScrollView style={styles.scrollView} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+     // Use ScrollView to handle content potentially exceeding screen height, especially with keyboard
+    <ScrollView
+         style={styles.scrollView}
+         contentContainerStyle={styles.container}
+         keyboardShouldPersistTaps="handled" // Ensures taps work correctly when keyboard is open
+    >
        <Text style={styles.title}>Scan Product QR Code</Text>
 
-        {/* --- Camera Scanner --- */}
+        {/* --- Camera Scanner Section --- */}
        <View style={styles.scannerContainer}>
-         {isScanning && !isProcessing ? (
+         {/* Conditionally render CameraView or a placeholder */}
+         {(isScanning && !isProcessing) ? (
             <CameraView
-              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned} // Only call if not already scanned/processing
+              // Only attach scanner listener if not already scanned/processing
+              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
               barcodeScannerSettings={{
-                barcodeTypes: ["qr", "ean13", "code128", "pdf417", "datamatrix"], // Added common types
+                // Specify barcode types (QR is primary, others are optional)
+                barcodeTypes: ["qr", "ean13", "code128", "pdf417", "datamatrix"],
               }}
-              style={StyleSheet.absoluteFillObject} // Make camera fill the container
+              // Fill the container
+              style={StyleSheet.absoluteFillObject}
             />
           ) : (
+             // Placeholder shown when not scanning or when processing data
              <View style={styles.placeholder}>
                  <Ionicons name={isProcessing ? "hourglass-outline" : "camera-outline"} size={50} color="#888" />
-                 <Text style={styles.placeholderText}>{isProcessing ? "Processing..." : "Scanner Ready"}</Text>
+                 <Text style={styles.placeholderText}>{isProcessing ? "Saving..." : "Scanner Off"}</Text>
              </View>
           )
          }
        </View>
 
-       {/* --- Error Message Display --- */}
+       {/* --- Error Message Display Area --- */}
         {errorMessage && (
              <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle-outline" size={18} color={styles.errorText.color} />
@@ -432,14 +492,16 @@ export default function ScanScreen() {
              </View>
         )}
 
-        {/* --- Scan Buttons --- */}
+        {/* --- Scan Control Buttons --- */}
         <View style={styles.buttonContainer}>
            {!isScanning ? (
+                 // Show "Start Scanning" button
                 <TouchableOpacity style={[styles.button, styles.primaryButton]} onPress={startScan} disabled={isProcessing}>
                     <Ionicons name="scan-outline" size={20} color="#fff" />
                     <Text style={styles.buttonText}>Start Scanning</Text>
                 </TouchableOpacity>
             ) : (
+                 // Show "Stop Scanning" button
                 <TouchableOpacity style={[styles.button, styles.stopButton]} onPress={stopScan} disabled={isProcessing}>
                      <Ionicons name="stop-circle-outline" size={20} color="#fff" />
                     <Text style={styles.buttonText}>Stop Scanning</Text>
@@ -447,7 +509,7 @@ export default function ScanScreen() {
             )}
         </View>
 
-        {/* --- Manual Entry Section --- */}
+        {/* --- Manual Entry Form Section --- */}
         <View style={styles.manualEntryContainer}>
              <Text style={styles.manualTitle}>Or Add/Update Manually</Text>
              <TextInput
@@ -455,8 +517,9 @@ export default function ScanScreen() {
                 placeholder="Product ID (Unique)"
                 value={manualId}
                 onChangeText={setManualId}
-                autoCapitalize="none"
+                autoCapitalize="none" // Prevent auto-capitalization for IDs
                 placeholderTextColor="#aaa"
+                editable={!isProcessing} // Disable input while processing
             />
              <TextInput
                 style={styles.input}
@@ -464,14 +527,16 @@ export default function ScanScreen() {
                 value={manualName}
                 onChangeText={setManualName}
                 placeholderTextColor="#aaa"
+                editable={!isProcessing}
             />
              <TextInput
                 style={styles.input}
                 placeholder="Current Quantity"
                 value={manualQuantity}
                 onChangeText={setManualQuantity}
-                keyboardType="numeric"
+                keyboardType="numeric" // Show numeric keyboard
                 placeholderTextColor="#aaa"
+                editable={!isProcessing}
             />
              <TextInput
                 style={styles.input}
@@ -480,44 +545,57 @@ export default function ScanScreen() {
                 onChangeText={setManualRate}
                 autoCapitalize="none"
                 placeholderTextColor="#aaa"
+                editable={!isProcessing}
             />
+             {/* Helper text for rate format */}
              <Text style={styles.inputHelper}>e.g., "5 per day", "10 / week", "1 / month"</Text>
 
+              {/* Manual Add/Update Button */}
               <TouchableOpacity
-                 style={[styles.button, styles.primaryButton, styles.manualAddButton]}
+                 style={[
+                     styles.button,
+                     styles.primaryButton,
+                     styles.manualAddButton,
+                     (isProcessing || mutation.isPending) && styles.disabledButton // Style when disabled
+                    ]}
                  onPress={handleManualAdd}
-                 disabled={isProcessing || mutation.isPending} // Disable during processing
+                 // Disable button during processing or mutation
+                 disabled={isProcessing || mutation.isPending}
                >
-                 {isProcessing || mutation.isPending ? (
+                 {/* Show activity indicator or icon */}
+                 {(isProcessing || mutation.isPending) ? (
                      <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
                  ) : (
                      <Ionicons name="add-circle-outline" size={20} color="#fff" />
                  )}
+                 {/* Change button text based on state */}
                  <Text style={styles.buttonText}>
-                     {isProcessing || mutation.isPending ? 'Processing...' : 'Add / Update'}
+                     {(isProcessing || mutation.isPending) ? 'Saving...' : 'Add / Update'}
                  </Text>
              </TouchableOpacity>
         </View>
 
-        {/* Spacer at the bottom */}
+        {/* Spacer at the bottom to ensure content doesn't hide behind tab bar */}
         <View style={{ height: 50 }} />
 
     </ScrollView>
   );
 }
 
+// --- Styles ---
+// Using StyleSheet for performance optimizations
 const styles = StyleSheet.create({
   scrollView: {
       flex: 1,
-      backgroundColor: '#f0f2f5', // Lighter background
+      backgroundColor: '#f0f2f5', // Light background for the whole screen
   },
   container: {
-    // flex: 1, // Remove flex: 1 for ScrollView content
+    // Use padding instead of flex: 1 for ScrollView content
     padding: 20,
-    alignItems: 'center',
-    paddingBottom: 40, // Add padding to bottom to ensure scroll
+    alignItems: 'center', // Center items horizontally
+    paddingBottom: 40, // Ensure space at the bottom
   },
-   centered: {
+   centered: { // Style for loading/permission states
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
@@ -525,45 +603,45 @@ const styles = StyleSheet.create({
      backgroundColor: '#f0f2f5',
   },
   title: {
-      fontSize: 24, // Larger title
+      fontSize: 24,
       fontWeight: 'bold',
-      marginBottom: 20, // More space below title
-      color: '#1a202c', // Darker text
+      marginBottom: 20,
+      color: '#1a202c', // Darker text for title
       textAlign: 'center',
   },
-   scannerContainer: {
-    width: '95%', // Slightly wider
-    maxWidth: 400, // Max width for larger screens
-    aspectRatio: Platform.OS === 'web' ? 16/9 : 4/3, // Different aspect ratio for web? Adjust as needed.
-    overflow: 'hidden',
-    borderRadius: 12, // More rounded corners
+   scannerContainer: { // Container for the camera view/placeholder
+    width: '95%',
+    maxWidth: 400, // Max width on larger screens/web
+    aspectRatio: Platform.OS === 'web' ? 16/9 : 4/3, // Standard camera aspect ratios
+    overflow: 'hidden', // Clip CameraView to bounds
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#d1d5db', // Lighter border
-    marginBottom: 25, // More space below scanner
-    backgroundColor: '#e5e7eb', // Light gray placeholder background
-    justifyContent: 'center',
+    borderColor: '#d1d5db', // Light gray border
+    marginBottom: 25,
+    backgroundColor: '#e5e7eb', // Background for placeholder
+    justifyContent: 'center', // Center placeholder content
     alignItems: 'center',
-    position: 'relative', // For potential overlays later
+    position: 'relative', // Needed for absolute positioning of CameraView
   },
-  placeholder: {
+  placeholder: { // Content inside the placeholder view
       justifyContent: 'center',
       alignItems: 'center',
       padding: 20,
   },
   placeholderText: {
-      color: '#6b7280', // Slightly darker placeholder text
+      color: '#6b7280',
       fontSize: 16,
       marginTop: 10,
       textAlign: 'center',
   },
-  buttonContainer: {
+  buttonContainer: { // Container for Start/Stop scan buttons
     flexDirection: 'row',
-    justifyContent: 'center', // Center the buttons
+    justifyContent: 'center',
     width: '95%',
     maxWidth: 400,
-    marginBottom: 30, // More space below buttons
+    marginBottom: 30,
   },
-  button: {
+  button: { // Base button style
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -574,90 +652,95 @@ const styles = StyleSheet.create({
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.15,
       shadowRadius: 3.84,
-      elevation: 3,
-      minWidth: 150, // Ensure buttons have some minimum width
+      elevation: 3, // Android shadow
+      minWidth: 150, // Ensure buttons have decent width
   },
-  primaryButton: {
+  primaryButton: { // Style for primary actions (scan, add)
       backgroundColor: '#006400', // Dark Green
   },
-  stopButton: {
-       backgroundColor: '#b91c1c', // Red-700 for stop
+  stopButton: { // Style for stop scan button
+       backgroundColor: '#b91c1c', // Red
   },
-  buttonText: {
+   disabledButton: { // Style for disabled buttons
+      backgroundColor: '#9ca3af', // Gray
+      elevation: 0, // Remove shadow
+      shadowOpacity: 0,
+  },
+  buttonText: { // Text inside buttons
        color: '#ffffff',
-       marginLeft: 8,
+       marginLeft: 8, // Space icon from text
        fontSize: 16,
-       fontWeight: '600', // Bolder text
+       fontWeight: '600',
    },
-  permissionText: {
+  permissionText: { // Text shown when permission denied
     textAlign: 'center',
     marginBottom: 15,
     fontSize: 16,
-    color: '#4b5563', // Gray-600
+    color: '#4b5563',
     lineHeight: 22,
   },
-   errorContainer: {
+   errorContainer: { // Container for displaying error messages
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#fef2f2', // Light red background
         paddingVertical: 8,
         paddingHorizontal: 12,
         borderRadius: 6,
-        marginTop: 10,
-        marginBottom: 15,
+        marginTop: 10, // Space above error
+        marginBottom: 15, // Space below error
         width: '90%',
         maxWidth: 380,
         borderLeftWidth: 4,
-        borderLeftColor: '#dc2626', // Red border
+        borderLeftColor: '#dc2626', // Red accent border
    },
-  errorText: {
-    color: '#dc2626', // Red-600 for errors
+  errorText: { // Text for error messages
+    color: '#dc2626', // Red
     fontSize: 14,
     fontWeight: '500',
-    marginLeft: 8, // Space between icon and text
-    flexShrink: 1, // Allow text to wrap
+    marginLeft: 8, // Space from icon
+    flexShrink: 1, // Allow text to wrap if long
   },
-   manualEntryContainer: {
+   manualEntryContainer: { // Container for the manual form
     width: '95%',
     maxWidth: 400,
     padding: 20,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#ffffff', // White background for form
     borderRadius: 12,
-    marginTop: 15,
+    marginTop: 15, // Space above form
     borderWidth: 1,
-    borderColor: '#e5e7eb', // Lighter border
+    borderColor: '#e5e7eb', // Light border
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1, },
     shadowOpacity: 0.1,
     shadowRadius: 2,
-    elevation: 2,
+    elevation: 2, // Android shadow
   },
-  manualTitle: {
-      fontSize: 20, // Slightly larger manual title
+  manualTitle: { // Title for manual entry section
+      fontSize: 20,
       fontWeight: '600',
-      marginBottom: 20, // More space below title
+      marginBottom: 20,
       textAlign: 'center',
-      color: '#374151', // Gray-700
+      color: '#374151',
   },
-  input: {
-    height: 50, // Taller input fields
-    borderColor: '#d1d5db', // Gray-300 border
+  input: { // Style for TextInput fields
+    height: 50,
+    borderColor: '#d1d5db',
     borderWidth: 1,
-    marginBottom: 15, // More space between inputs
-    paddingHorizontal: 15, // More padding
-    borderRadius: 8, // More rounded inputs
-    backgroundColor: '#f9fafb', // Very light gray background
-    fontSize: 16, // Larger font size
+    marginBottom: 15,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    backgroundColor: '#f9fafb', // Very light gray input background
+    fontSize: 16,
     color: '#1f2937', // Darker input text
   },
-   inputHelper: {
+   inputHelper: { // Helper text below rate input
        fontSize: 12,
-       color: '#6b7280', // Gray-500
-       marginBottom: 20, // More space below helper
-       marginTop: -10, // Adjust position relative to input
+       color: '#6b7280',
+       marginBottom: 20,
+       marginTop: -10, // Position closer to the input above
        textAlign: 'center',
    },
-   manualAddButton: {
-       marginTop: 10, // Space above manual add button
+   manualAddButton: { // Specific margin for manual add button
+       marginTop: 10,
    }
 });

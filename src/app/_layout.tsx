@@ -16,43 +16,51 @@ SplashScreen.preventAutoHideAsync();
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
-            staleTime: 1000 * 60 * 5, // 5 minutes
+            staleTime: 1000 * 60 * 5, // 5 minutes default stale time
         },
     },
 });
 
 export default function RootLayout() {
     const [loaded, error] = useFonts({
-      ...Ionicons.font, // Load Ionicons font
+      ...Ionicons.font, // Load Ionicons font is crucial for the UI
     });
 
      // Expo Router uses Error Boundaries to catch errors in the navigation tree.
     React.useEffect(() => {
-      if (error) throw error;
+      if (error) throw error; // Throw error if font loading fails
     }, [error]);
 
     React.useEffect(() => {
       if (loaded) {
-        SplashScreen.hideAsync();
+        SplashScreen.hideAsync(); // Hide splash screen once fonts are loaded
       }
     }, [loaded]);
 
+    // Don't render anything until the fonts are loaded
     if (!loaded) {
-      return null; // Return null while fonts are loading
+      return null;
     }
 
 
     return (
+        // GestureHandlerRootView is required for react-native-gesture-handler
         <GestureHandlerRootView style={{ flex: 1 }}>
+          {/* SafeAreaProvider ensures content respects device notches/safe areas */}
           <SafeAreaProvider>
+              {/* FirebaseProvider initializes and provides Firebase context */}
               <FirebaseProvider>
+                  {/* QueryClientProvider sets up React Query */}
                   <QueryClientProvider client={queryClient}>
+                      {/* StatusBar configures the device status bar style */}
                       <StatusBar style="auto" />
+                       {/* Root Stack Navigator - Hides the header by default */}
                       <Stack screenOptions={{ headerShown: false }}>
+                         {/* Define the (tabs) layout as a screen within the stack */}
                          <Stack.Screen name="(tabs)" />
-                         {/* Define other non-tab screens here if needed */}
+                         {/* Add other root-level screens here if needed (e.g., Auth flow, Modals) */}
                       </Stack>
-                      {/* Toast needs to be rendered at the root */}
+                      {/* Toast needs to be rendered at the root, outside navigators */}
                       <Toast />
                   </QueryClientProvider>
               </FirebaseProvider>

@@ -29,7 +29,8 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+       "bundler": "metro"
     },
     "plugins": [
       "expo-router"
@@ -45,6 +46,7 @@
       "eas": {
         "projectId": "YOUR_EAS_PROJECT_ID_HERE"
       },
+       // Ensure these placeholder keys exist for Firebase config
       "firebaseApiKey": "YOUR_API_KEY",
       "firebaseAuthDomain": "YOUR_PROJECT_ID.firebaseapp.com",
       "firebaseProjectId": "YOUR_PROJECT_ID",
