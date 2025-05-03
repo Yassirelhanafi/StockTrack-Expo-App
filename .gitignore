@@ -1,20 +1,16 @@
-# Expo specific files
+# Expo
 .expo/
 web-build/
+dist/
+
+# Dependency directories
 node_modules/
 
-# Build artifacts
-*.js.map
-*.bundle
-
-# Log files
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Optional sensitivity files
+.env
 
 # Editor directories and files
-.idea
+.idea/
 .vscode/
 *.suo
 *.ntvs*
@@ -22,15 +18,21 @@ yarn-error.log*
 *.sln
 *.sw?
 
-# Optional: Environment variables file
-.env
+# Debugging
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Optional: Operating System files
+# Build results
+ios/build/
+android/build/
+android/app/build/
+
+# EAS metadata
+.eas/
+
+# Optional Expo Go logs
+*.jso
+
+# macOS
 .DS_Store
-Thumbs.db
-
-# EAS Build specific (if using EAS)
-dist/
-eas-build-pre-upload.tar.gz
-ios/
-android/

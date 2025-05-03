@@ -1,7 +1,5 @@
-'use client'; // Keep this for potential future client-side use, though initialization is safer server-side/build-time
-
 import type React from 'react';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import Constants from 'expo-constants'; // Import Constants
@@ -27,62 +25,111 @@ export function useFirebase() {
 }
 
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
-  const [app, setApp] = useState<FirebaseApp | null>(null);
-  const [db, setDb] = useState<Firestore | null>(null);
-  const [isFirebaseAvailable, setIsFirebaseAvailable] = useState(false);
+  const [initializationAttempted, setInitializationAttempted] = useState(false);
+  const [firebaseState, setFirebaseState] = useState<FirebaseContextProps>({
+      app: null,
+      db: null,
+      isFirebaseAvailable: false,
+  });
 
   useEffect(() => {
+    if (initializationAttempted || typeof window === 'undefined') {
+      // Run only once on the client
+      return;
+    }
+
+    setInitializationAttempted(true); // Mark that we've tried initializing
+
+    console.log("Attempting Firebase initialization...");
+
     // Attempt to get Firebase config from expo-constants extra
     const firebaseConfig = Constants.expoConfig?.extra;
 
-    // Check if essential Firebase config values are present
-    const hasFirebaseConfig =
-      firebaseConfig?.firebaseProjectId &&
-      firebaseConfig?.firebaseApiKey &&
-      firebaseConfig?.firebaseAppId; // Add other essential checks if needed
+    // Define required keys for a valid config
+    const requiredKeys: (keyof typeof firebaseConfig)[] = [
+        'firebaseApiKey',
+        'firebaseAuthDomain',
+        'firebaseProjectId',
+        'firebaseStorageBucket',
+        'firebaseMessagingSenderId',
+        'firebaseAppId'
+    ];
+
+    // Check if all required Firebase config values are present and non-empty strings
+    const hasFirebaseConfig = firebaseConfig && requiredKeys.every(key =>
+        typeof firebaseConfig[key] === 'string' && firebaseConfig[key]
+    );
 
     if (hasFirebaseConfig) {
         console.log("Firebase config found in Constants:", {
              projectId: firebaseConfig.firebaseProjectId,
-             apiKey: firebaseConfig.firebaseApiKey ? '***' : 'MISSING',
-             // Add other relevant keys for debugging if needed
+             apiKey: '***', // Don't log sensitive keys
+             appId: firebaseConfig.firebaseAppId
          });
-      if (typeof window !== 'undefined' && !getApps().length) {
-        // Initialize only on the client and if not already initialized
-        try {
-          const firebaseAppInstance = initializeApp({
+
+        const appConfig = {
                 apiKey: firebaseConfig.firebaseApiKey,
                 authDomain: firebaseConfig.firebaseAuthDomain,
                 projectId: firebaseConfig.firebaseProjectId,
                 storageBucket: firebaseConfig.firebaseStorageBucket,
                 messagingSenderId: firebaseConfig.firebaseMessagingSenderId,
                 appId: firebaseConfig.firebaseAppId,
-            });
-          const firestoreDb = getFirestore(firebaseAppInstance);
-          setApp(firebaseAppInstance);
-          setDb(firestoreDb);
-          setIsFirebaseAvailable(true); // Set availability flag
-          console.log('Firebase initialized successfully.');
+            };
+
+        let currentApp: FirebaseApp | null = null;
+        let currentDb: Firestore | null = null;
+        let available = false;
+
+        try {
+            if (!getApps().length) {
+                // Initialize if no apps exist
+                console.log("No existing Firebase app, initializing new one...");
+                currentApp = initializeApp(appConfig);
+                console.log('Firebase initialized successfully.');
+            } else {
+                 // Use existing app instance if already initialized (e.g., HMR)
+                console.log('Using existing Firebase app instance.');
+                currentApp = getApps()[0];
+                // Optional: Verify if existing app config matches current config?
+            }
+
+            if (currentApp) {
+                 currentDb = getFirestore(currentApp);
+                 available = true; // Mark as available if app and db obtained
+            }
+
         } catch (error) {
-          console.error('Firebase initialization error:', error);
-          setIsFirebaseAvailable(false); // Ensure flag is false on error
+            console.error('Firebase initialization or Firestore access error:', error);
+            // Ensure state reflects failure
+             currentApp = null;
+             currentDb = null;
+             available = false;
         }
-      } else if (getApps().length) {
-        // Use existing app instance if already initialized (e.g., HMR)
-        const existingApp = getApps()[0];
-        setApp(existingApp);
-        setDb(getFirestore(existingApp));
-        setIsFirebaseAvailable(true);
-        console.log('Using existing Firebase app instance.');
-      }
+
+        setFirebaseState({
+            app: currentApp,
+            db: currentDb,
+            isFirebaseAvailable: available
+        });
+
+
     } else {
-      console.warn('Firebase configuration not found in expo-constants. Firebase features (like notifications) will be unavailable.');
-      setIsFirebaseAvailable(false); // Mark Firebase as unavailable
+      console.warn('Firebase configuration missing or incomplete in app.json extra. Required keys:', requiredKeys.join(', '));
+      console.warn('Firebase features (like notifications & sync) will be unavailable.');
+       setFirebaseState({
+            app: null,
+            db: null,
+            isFirebaseAvailable: false
+       }); // Mark Firebase as unavailable
     }
-  }, []); // Run only once on mount
+  }, [initializationAttempted]); // Run when attempt status changes (effectively once on client)
+
+  // Use useMemo to prevent unnecessary re-renders of consumers if state hasn't changed
+  const providerValue = useMemo(() => firebaseState, [firebaseState]);
+
 
   return (
-    <FirebaseContext.Provider value={{ app, db, isFirebaseAvailable }}>
+    <FirebaseContext.Provider value={providerValue}>
       {children}
     </FirebaseContext.Provider>
   );

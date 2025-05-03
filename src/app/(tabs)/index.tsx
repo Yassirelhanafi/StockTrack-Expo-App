@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Button, StyleSheet, Alert, TextInput, Platform, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Alert, TextInput, Platform, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
-import { addProduct, updateProductQuantity, type Product as FirebaseProduct } from '@/lib/firebase/firestore';
+import { addProduct as addFirebaseProduct, type Product as FirebaseProduct } from '@/lib/firebase/firestore'; // Firebase add
 import { storeProduct, type Product as LocalProduct } from '@/lib/local-storage'; // Import local storage functions
 import { Ionicons } from '@expo/vector-icons';
 import { useFirebase } from '@/providers/firebase-provider'; // To check Firebase availability
 
-const CONSUMPTION_RATE_REGEX = /^(\d+)\s*(per|every|\/)\s*(day|week|month)$/i;
-const LOW_STOCK_THRESHOLD = 10;
+// Regex fixed to handle escaping and proper grouping
+const CONSUMPTION_RATE_REGEX = /^(\d+)\s*(?:per|every|\/)\s*(day|week|month)$/i;
+const LOW_STOCK_THRESHOLD = 10; // Define a threshold for low stock alerts
 
-// Use a type that works for both local and Firebase (Firebase needs Date, local can use string or number)
+
+// Use a type that works for both local and Firebase
 interface ProductData {
   id: string;
   name: string;
@@ -20,8 +22,7 @@ interface ProductData {
     amount: number;
     unit: 'day' | 'week' | 'month';
   };
-  lastUpdated: string | Date; // Use ISO string for local storage, Date for Firebase
-  lastDecremented?: string | Date;
+  // Timestamps handled appropriately before saving to respective stores
 }
 
 
@@ -81,12 +82,12 @@ export default function ScanScreen() {
             let firebaseError = null;
             if (productForFirebase) {
                  try {
-                    await addProduct(productForFirebase);
+                    await addFirebaseProduct(productForFirebase); // Use renamed function
                     console.log('Product added/updated in Firebase:', product.id);
                  } catch (fbError: any) {
                      console.error("Firebase sync failed:", fbError);
                      firebaseError = fbError; // Store error to report later
-                     // Don't attempt updateQuantity here, addProduct uses setDoc merge
+                     // addFirebaseProduct uses setDoc merge, so no need for separate updateQuantity call here
                  }
             } else {
                  console.log("Firebase not available or configured, skipping Firebase sync.");
@@ -163,7 +164,7 @@ export default function ScanScreen() {
     const match = rateString.trim().match(CONSUMPTION_RATE_REGEX);
     if (match) {
       const amount = parseInt(match[1], 10);
-      const unit = match[3].toLowerCase() as 'day' | 'week' | 'month';
+      const unit = match[2].toLowerCase() as 'day' | 'week' | 'month'; // Index 2 for the unit
       if (!isNaN(amount) && ['day', 'week', 'month'].includes(unit)) {
         return { amount, unit };
       }
@@ -188,7 +189,7 @@ export default function ScanScreen() {
                 id: String(data.id),
                 name: String(data.name),
                 quantity: data.quantity,
-                lastUpdated: new Date().toISOString(), // Default to now for parsing
+                // Timestamps are not parsed from QR, set on save
             };
             // Handle consumption rate parsing (string or object)
             if (data.consumptionRate) {
@@ -205,10 +206,6 @@ export default function ScanScreen() {
                         }
                     }
                 }
-            }
-             if (data.lastUpdated) { // Allow overriding lastUpdated from QR if present
-                // Basic validation for date string might be needed here
-                product.lastUpdated = data.lastUpdated;
             }
             return product;
         }
@@ -237,9 +234,8 @@ export default function ScanScreen() {
                     }
                 } else if (trimmedKey === 'rate' || trimmedKey === 'consumptionrate') {
                     product.consumptionRate = parseConsumptionRate(value);
-                } else if (trimmedKey === 'lastupdated') {
-                    product.lastUpdated = value; // Assume ISO string if provided
                 }
+                 // Timestamps are not parsed from QR
             }
         });
 
@@ -250,7 +246,7 @@ export default function ScanScreen() {
                 id: product.id,
                 name: product.name,
                 quantity: product.quantity,
-                lastUpdated: product.lastUpdated || new Date().toISOString() // Default if not provided
+                // No timestamps here
             } as ProductData;
         }
     }
@@ -310,10 +306,24 @@ export default function ScanScreen() {
   };
 
 
-  const startScan = () => {
-    if (!permission?.granted) {
+  const startScan = async () => {
+     if (!permission) {
+        await requestPermission();
+        // Re-check permission after requesting
+        if (!permission?.granted) {
+           Toast.show({type: 'error', text1: 'Camera Permission Needed', position: 'bottom'});
+           return;
+        }
+     }
+     if (!permission.granted) {
          Toast.show({type: 'error', text1: 'Camera Permission Needed', position: 'bottom'});
-         requestPermission();
+         const canAskAgain = permission.canAskAgain;
+         if(canAskAgain) {
+             requestPermission();
+         } else {
+             // Guide user to settings
+             Alert.alert("Permission Required", "Camera permission is denied. Please enable it in your device settings.");
+         }
          return;
      }
     setScanResult(null);
@@ -339,7 +349,7 @@ export default function ScanScreen() {
             consumptionRate = parseConsumptionRate(manualRate);
             // If parsing fails but rate was entered, stop the process
             if (!consumptionRate) {
-                 Alert.alert("Validation Error", "Invalid Consumption Rate format. Please use 'X per day/week/month'.");
+                 // Toast is shown in parseConsumptionRate
                 return;
             }
         }
@@ -350,7 +360,7 @@ export default function ScanScreen() {
         name: manualName.trim(),
         quantity: quantityNum,
         consumptionRate: consumptionRate,
-        lastUpdated: new Date().toISOString(), // Use ISO string for local
+        // Timestamps are set when saving
     };
 
     setScanResult(productData); // Set result to trigger confirmation
@@ -367,6 +377,7 @@ export default function ScanScreen() {
 
    // --- Render Logic ---
 
+  // Initial permission check (before granted/denied)
   if (permission === null) {
     return (
          <View style={styles.centered}>
@@ -375,18 +386,21 @@ export default function ScanScreen() {
          </View>
      );
   }
+
+  // Permission denied state
   if (!permission.granted) {
     return (
       <View style={styles.centered}>
         <Ionicons name="camera-reverse-outline" size={50} color="#6b7280" style={{marginBottom: 15}} />
         <Text style={styles.permissionText}>Camera access is needed to scan QR codes.</Text>
-        <TouchableOpacity style={[styles.button, styles.primaryButton]} onPress={requestPermission}>
+        <TouchableOpacity style={[styles.button, styles.primaryButton]} onPress={startScan}>
              <Text style={styles.buttonText}>Grant Permission</Text>
          </TouchableOpacity>
       </View>
     );
   }
 
+  // Permission granted, render the main screen
   return (
     <ScrollView style={styles.scrollView} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
        <Text style={styles.title}>Scan Product QR Code</Text>
@@ -501,6 +515,7 @@ const styles = StyleSheet.create({
     // flex: 1, // Remove flex: 1 for ScrollView content
     padding: 20,
     alignItems: 'center',
+    paddingBottom: 40, // Add padding to bottom to ensure scroll
   },
    centered: {
     flex: 1,
@@ -597,7 +612,6 @@ const styles = StyleSheet.create({
    },
   errorText: {
     color: '#dc2626', // Red-600 for errors
-    // textAlign: 'center',
     fontSize: 14,
     fontWeight: '500',
     marginLeft: 8, // Space between icon and text

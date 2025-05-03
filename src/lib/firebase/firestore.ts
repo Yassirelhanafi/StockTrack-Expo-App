@@ -1,7 +1,6 @@
 import {
   getFirestore,
   collection,
-  // addDoc, // Prefer setDoc with ID
   getDocs,
   updateDoc,
   doc,
@@ -13,10 +12,10 @@ import {
   getDoc,
   setDoc,
   orderBy,
-  // limit, // Use if needed for notifications query
   deleteDoc,
+  type Firestore,
 } from 'firebase/firestore';
-import { getApps } from 'firebase/app';
+import { getApps, type FirebaseApp } from 'firebase/app';
 import { getProduct as getLocalProduct, updateLocalProductQuantity } from '@/lib/local-storage'; // Import local storage functions
 
 
@@ -33,31 +32,57 @@ export interface Product {
   lastDecremented?: Timestamp; // Use Timestamp for Firestore
 }
 
-// Define Notification Type (remains the same)
+// Define Notification Type
 export interface Notification {
     id: string; // Firestore document ID
     productId: string;
     productName: string;
     quantity: number;
-    timestamp: Timestamp;
-    acknowledged?: boolean;
+    timestamp: Timestamp; // Use Timestamp for Firestore
+    acknowledged: boolean; // Make non-optional, default to false
 }
 
 const LOW_STOCK_THRESHOLD = 10;
 
-// Get Firestore instance (ensure initialized) - Returns null if not available
-const getDb = () => {
-  if (!getApps().length) {
-     // console.warn('Firebase has not been initialized. Firestore functions unavailable.');
-    return null; // Return null if Firebase isn't ready
+// Keep track of the initialized app and db instances
+let firebaseAppInstance: FirebaseApp | null = null;
+let firestoreDbInstance: Firestore | null = null;
+
+
+// Helper function to get the Firestore instance (initialize if needed)
+// This function is NOT directly exported, used internally by other functions.
+const getDb = (): Firestore | null => {
+  // Return cached instance if available
+  if (firestoreDbInstance) {
+      return firestoreDbInstance;
   }
-  const db = getFirestore();
-    if (!db.app.options.projectId) {
-         console.warn('Firebase initialized but Project ID missing. Firestore functions likely unavailable.');
-         return null; // Firestore might not work without project ID
-    }
-    return db;
+
+  // Check if Firebase has been initialized (by FirebaseProvider)
+  if (!getApps().length) {
+     console.warn('Firebase has not been initialized. Firestore functions unavailable.');
+     return null;
+  }
+
+  // Get the initialized app instance (should exist if getApps().length > 0)
+  firebaseAppInstance = getApps()[0];
+
+  // Check if essential config is present on the app instance
+  if (!firebaseAppInstance?.options?.projectId) {
+      console.warn('Firebase App loaded, but Project ID missing in options. Firestore might be unavailable.');
+      return null;
+  }
+
+  // Get and cache the Firestore instance
+  try {
+      firestoreDbInstance = getFirestore(firebaseAppInstance);
+      console.log("Firestore instance obtained successfully.");
+      return firestoreDbInstance;
+  } catch (error) {
+       console.error("Error getting Firestore instance:", error);
+       return null;
+  }
 };
+
 
 // --- Product Functions (Firebase-specific, check for DB availability) ---
 
@@ -68,14 +93,14 @@ const getDb = () => {
  */
 export const addProduct = async (productData: Omit<Product, 'lastUpdated' | 'lastDecremented'> & { lastUpdated: Date, lastDecremented?: Date }) => {
   const db = getDb();
-  if (!db) return Promise.reject(new Error("Firebase not available")); // Early exit if DB is null
+  if (!db) return Promise.reject(new Error("Firebase Firestore is not available or configured correctly."));
 
   const productRef = doc(db, 'products', productData.id); // Use custom ID as document ID
   try {
     await setDoc(productRef, {
         ...productData,
         lastUpdated: Timestamp.fromDate(productData.lastUpdated), // Convert Date to Timestamp
-        // Convert lastDecremented only if it exists
+        // Convert lastDecremented only if it exists, ensure it's null if undefined
         lastDecremented: productData.lastDecremented ? Timestamp.fromDate(productData.lastDecremented) : null
     }, { merge: true }); // Use merge: true to create or update
     console.log('Firebase: Product added/updated successfully:', productData.id);
@@ -94,20 +119,23 @@ export const addProduct = async (productData: Omit<Product, 'lastUpdated' | 'las
  */
 export const getProducts = async (): Promise<Product[]> => {
     const db = getDb();
-    if (!db) return Promise.resolve([]); // Return empty array if Firebase not available
+    if (!db) {
+        console.warn("Firebase Firestore not available, returning empty product list.");
+        return Promise.resolve([]);
+    }
 
     const productsCol = collection(db, 'products');
     try {
         const productSnapshot = await getDocs(productsCol);
         const productList = productSnapshot.docs.map((doc) => ({
-            ...doc.data(),
             id: doc.id, // Use Firestore document ID
+            ...doc.data(),
         })) as Product[];
         console.log(`Firebase: Fetched ${productList.length} products.`);
         return productList;
     } catch (error) {
         console.error("Firebase: Error fetching products:", error);
-        return []; // Return empty on error
+        throw error; // Re-throw to allow React Query to handle error state
     }
 };
 
@@ -122,7 +150,7 @@ export const updateProductQuantity = async (
   newQuantity: number
 ) => {
   const db = getDb();
-  if (!db) return Promise.reject(new Error("Firebase not available"));
+  if (!db) return Promise.reject(new Error("Firebase Firestore is not available."));
 
   const productRef = doc(db, 'products', productId);
   try {
@@ -142,13 +170,13 @@ export const updateProductQuantity = async (
 
 /**
  * Decrements quantities for products stored in Firestore based on their consumption rate.
- * Should ideally be run by a scheduled Cloud Function.
+ * Should ideally be run by a scheduled Cloud Function, but this provides client-side fallback.
  * @returns Promise resolving when the operation is complete.
  */
 export const decrementQuantities = async () => {
   const db = getDb();
   if (!db) {
-    console.warn("Firebase not available, skipping Firestore quantity decrement.");
+    console.warn("Firebase Firestore not available, skipping Firestore quantity decrement.");
     return;
   }
 
@@ -169,21 +197,34 @@ export const decrementQuantities = async () => {
 
   try {
       const querySnapshot = await getDocs(q);
-      console.log(`Firebase: Found ${querySnapshot.docs.length} products with consumption rate and quantity > 0.`);
+      console.log(`Firebase: Found ${querySnapshot.docs.length} products with consumption rate and quantity > 0 to check.`);
 
       querySnapshot.forEach((docSnap) => {
           const product = { id: docSnap.id, ...docSnap.data() } as Product;
           const rate = product.consumptionRate;
           // Ensure lastDecremented is a Date object for calculations
-          const lastDecrementedDate = product.lastDecremented instanceof Timestamp
-                ? product.lastDecremented.toDate()
-                : new Date(0); // If null/undefined or invalid, assume very old
+           // Default to a very old date if null, undefined, or invalid
+          let lastDecrementedDate = new Date(0);
+          if (product.lastDecremented instanceof Timestamp) {
+              lastDecrementedDate = product.lastDecremented.toDate();
+           } else if (typeof product.lastDecremented === 'number') { // Handle potential number timestamps
+               lastDecrementedDate = new Date(product.lastDecremented);
+           }
+           // Ensure the date is valid, otherwise default to distant past
+           if (isNaN(lastDecrementedDate.getTime())) {
+               lastDecrementedDate = new Date(0);
+               console.warn(`Firebase: Invalid lastDecremented timestamp for product ${product.id}, defaulting.`);
+           }
 
 
           if (!rate) return; // Should not happen due to query, but safe check
 
           let periodsPassed = 0;
           const diffTime = now.getTime() - lastDecrementedDate.getTime();
+
+          // Only proceed if enough time has passed (e.g., more than half a day for daily rates)
+          if (diffTime <= 0) return;
+
           const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
           if (rate.unit === 'day') {
@@ -191,58 +232,63 @@ export const decrementQuantities = async () => {
           } else if (rate.unit === 'week') {
               periodsPassed = Math.floor(diffDays / 7);
           } else if (rate.unit === 'month') {
-              periodsPassed = Math.floor(diffDays / 30.44); // Approximation
+              // Using average days in month for approximation
+              periodsPassed = Math.floor(diffDays / 30.4375);
           }
+
 
           if (periodsPassed > 0) {
               const quantityToDecrement = periodsPassed * rate.amount;
               const newQuantity = Math.max(0, product.quantity - quantityToDecrement);
 
               if (newQuantity < product.quantity) {
-                  console.log(`Firebase: Decrementing ${product.name} (ID: ${product.id}) by ${quantityToDecrement}. New Qty: ${newQuantity}`);
+                  console.log(`Firebase: Decrementing ${product.name} (ID: ${product.id}) by ${quantityToDecrement}. Old: ${product.quantity}, New: ${newQuantity}`);
                   const productRef = doc(db, 'products', product.id);
                   batch.update(productRef, {
                       quantity: newQuantity,
-                      lastDecremented: nowTimestamp, // Update last decremented time
+                      lastDecremented: nowTimestamp, // Update last decremented time to now
                       lastUpdated: nowTimestamp,     // Also update general update time
                   });
                   updatesMade++;
                    // Add to list for low stock check AFTER batch commit
                   productsToCheckStock.push({ id: product.id, name: product.name, newQuantity });
 
-                   // **Crucially, update local storage too**
-                  // We await this individually as it's less critical than the batch commit
-                  updateLocalProductQuantity(product.id, newQuantity).catch(e =>
-                     console.error(`Error updating local quantity for ${product.id} after Firebase decrement:`, e)
-                  );
+                  // Attempt to update local storage as well (fire-and-forget, log errors)
+                  updateLocalProductQuantity(product.id, newQuantity)
+                      .then(() => console.log(`Locally updated quantity for ${product.id} after Firebase decrement.`))
+                      .catch(e => console.error(`Error updating local quantity for ${product.id} after Firebase decrement:`, e));
 
-              } else if (product.quantity > 0) {
-                 // If no quantity change but time passed, update lastDecremented only
-                 // This prevents re-evaluating within the same period if checked frequently
+              } else if (product.quantity > 0 && periodsPassed > 0) {
+                  // If quantity didn't change BUT time has passed since last check,
+                  // update lastDecremented timestamp to prevent re-checking immediately.
+                  console.log(`Firebase: Updating lastDecremented for ${product.name} (ID: ${product.id}) as time passed but no quantity change.`);
                    const productRef = doc(db, 'products', product.id);
                     batch.update(productRef, {
                         lastDecremented: nowTimestamp,
-                        // Maybe don't update lastUpdated here?
+                        // Don't necessarily need to update lastUpdated here
                     });
-                    console.log(`Firebase: Updated lastDecremented for ${product.name} (ID: ${product.id}) as no quantity change needed.`);
+                    // No need to increment updatesMade or check stock if only timestamp updated
               }
           }
       });
 
       if (updatesMade > 0) {
           await batch.commit();
-          console.log(`Firebase: ${updatesMade} product quantities decremented successfully.`);
+          console.log(`Firebase: ${updatesMade} product quantities potentially decremented.`);
            // Now check low stock for affected products
           console.log(`Firebase: Checking low stock for ${productsToCheckStock.length} updated products...`);
-          for (const p of productsToCheckStock) {
-              await checkLowStock(p.id, p.newQuantity, p.name);
-          }
+          // Use Promise.all for concurrent checks
+          await Promise.all(productsToCheckStock.map(p =>
+             checkLowStock(p.id, p.newQuantity, p.name).catch(e => console.error(`Error checking low stock for ${p.id}:`, e))
+          ));
+          console.log("Firebase: Low stock checks complete.");
 
       } else {
-          console.log("Firebase: No products needed decrementing in this run.");
+          console.log("Firebase: No products required decrementing in this run.");
       }
   } catch (error) {
       console.error('Firebase: Error during decrement process: ', error);
+       // Consider how to handle batch errors - maybe retry individual updates?
   }
 };
 
@@ -271,9 +317,11 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
                 console.warn(`Firebase: Product ${productId} not found during low stock check.`);
+                // If product doesn't exist, ensure any related notification is removed
+                await deleteDoc(notificationRef).catch(() => {}); // Ignore error if notification didn't exist
                 return;
             }
-            const productData = productSnap.data() as Product; // Assume Product type
+            const productData = productSnap.data() as Omit<Product, 'id'>; // Assume Product type
             quantity = productData.quantity;
             name = productData.name;
         } else {
@@ -283,7 +331,7 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
 
         // Fetch existing notification to check acknowledged status
         const notificationSnap = await getDoc(notificationRef);
-        const isAcknowledged = notificationSnap.exists() && notificationSnap.data().acknowledged === true;
+        const isAcknowledged = notificationSnap.exists() && notificationSnap.data()?.acknowledged === true;
 
         if (quantity < LOW_STOCK_THRESHOLD) {
             // Only create/update notification if it's NOT already acknowledged
@@ -293,9 +341,9 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
                     productId: productId,
                     productName: name,
                     quantity: quantity,
-                    timestamp: serverTimestamp(), // Use server timestamp
-                    acknowledged: false // Ensure it's not acknowledged
-                }, { merge: true }); // Merge to avoid overwriting acknowledged field if it existed but was false
+                    timestamp: serverTimestamp(), // Use server timestamp for consistency
+                    acknowledged: false // Ensure it's not acknowledged or reset if previously acknowledged but stock dropped again
+                }, { merge: true }); // Merge ensures we don't overwrite acknowledged if we only update timestamp/qty
             } else {
                  console.log(`Firebase: Low stock for ${name} (ID: ${productId}) but notification already acknowledged. Ignoring.`);
             }
@@ -317,7 +365,10 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
  */
 export const getLowStockNotifications = async (): Promise<Notification[]> => {
   const db = getDb();
-  if (!db) return Promise.resolve([]); // Return empty array if Firebase unavailable
+  if (!db) {
+      console.warn("Firebase Firestore not available, returning empty notifications list.");
+      return Promise.resolve([]);
+  }
 
   const notificationsCol = collection(db, 'notifications');
   // Query for notifications that are not acknowledged, order by most recent first
@@ -326,40 +377,44 @@ export const getLowStockNotifications = async (): Promise<Notification[]> => {
   try {
       const notificationSnapshot = await getDocs(q);
       const notificationList = notificationSnapshot.docs.map((doc) => ({
-        ...doc.data(),
         id: doc.id, // Use Firestore document ID
+        acknowledged: false, // Explicitly set default from query
+        ...doc.data(),
       })) as Notification[];
       console.log(`Firebase: Fetched ${notificationList.length} active notifications.`);
       return notificationList;
   } catch (error) {
       console.error("Firebase: Error fetching notifications:", error);
-      return []; // Return empty on error
+      throw error; // Re-throw for React Query error handling
   }
 };
 
 
 /**
  * Marks a notification as acknowledged in Firestore.
- * @param notificationId The ID of the notification document.
+ * @param notificationId The ID of the notification document (usually the product ID).
  * @returns Promise resolving on success or rejecting on error.
  */
 export const acknowledgeNotification = async (notificationId: string) => {
     const db = getDb();
-    if (!db) return Promise.reject(new Error("Firebase not available"));
+    if (!db) return Promise.reject(new Error("Firebase Firestore is not available."));
 
     const notificationRef = doc(db, 'notifications', notificationId);
     try {
+        // Use updateDoc for potentially better performance if doc definitely exists
+        // Use setDoc with merge if you want to create it if it somehow got deleted
         await updateDoc(notificationRef, {
             acknowledged: true
         });
         console.log(`Firebase: Notification ${notificationId} acknowledged.`);
     } catch (error) {
         console.error(`Firebase: Error acknowledging notification ${notificationId}:`, error);
-        throw error;
+        // Check if the error is because the document doesn't exist
+        if ((error as any).code === 'not-found') {
+            console.warn(`Firebase: Notification ${notificationId} not found, could not acknowledge.`);
+            // Resolve peacefully as there's nothing to acknowledge
+            return Promise.resolve();
+        }
+        throw error; // Re-throw other errors
     }
 }
-
-// Note: setupClientSideDecrementInterval removed as it's unreliable.
-// Decrement logic should be triggered reliably (e.g., Cloud Function schedule).
-// You can manually trigger decrementQuantities() and decrementLocalQuantities() for testing,
-// perhaps on app load or via a button.

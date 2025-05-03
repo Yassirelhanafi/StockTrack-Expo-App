@@ -1,10 +1,17 @@
 import React from 'react';
-import { Stack } from 'expo-router'; // Use Stack or Slot for the root layout
+import { Stack } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FirebaseProvider } from '@/providers/firebase-provider';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
+import { Ionicons } from '@expo/vector-icons';
+import * as SplashScreen from 'expo-splash-screen';
+import { GestureHandlerRootView } from 'react-native-gesture-handler'; // Import for gesture handling
+
+// Prevent the splash screen from auto-hiding before asset loading is complete.
+SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -15,25 +22,41 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
-    return (
-        <SafeAreaProvider>
-            <FirebaseProvider>
-                <QueryClientProvider client={queryClient}>
-                    <StatusBar style="auto" />
-                    {/*
-                      Use Slot to render the child route (which will be the Tabs layout).
-                      Or use Stack if you might have screens outside the tabs later.
-                      Slot is generally simpler if the tabs are the main navigation.
-                    */}
-                    <Stack screenOptions={{ headerShown: false }}>
-                       <Stack.Screen name="(tabs)" />
-                       {/* Define other non-tab screens here if needed */}
-                    </Stack>
+    const [loaded, error] = useFonts({
+      ...Ionicons.font, // Load Ionicons font
+    });
 
-                    {/* Toast needs to be rendered at the root */}
-                    <Toast />
-                </QueryClientProvider>
-            </FirebaseProvider>
-        </SafeAreaProvider>
+     // Expo Router uses Error Boundaries to catch errors in the navigation tree.
+    React.useEffect(() => {
+      if (error) throw error;
+    }, [error]);
+
+    React.useEffect(() => {
+      if (loaded) {
+        SplashScreen.hideAsync();
+      }
+    }, [loaded]);
+
+    if (!loaded) {
+      return null; // Return null while fonts are loading
+    }
+
+
+    return (
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <SafeAreaProvider>
+              <FirebaseProvider>
+                  <QueryClientProvider client={queryClient}>
+                      <StatusBar style="auto" />
+                      <Stack screenOptions={{ headerShown: false }}>
+                         <Stack.Screen name="(tabs)" />
+                         {/* Define other non-tab screens here if needed */}
+                      </Stack>
+                      {/* Toast needs to be rendered at the root */}
+                      <Toast />
+                  </QueryClientProvider>
+              </FirebaseProvider>
+          </SafeAreaProvider>
+        </GestureHandlerRootView>
     );
 }

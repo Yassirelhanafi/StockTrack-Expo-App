@@ -4,18 +4,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAllProducts, removeProduct, type Product } from '@/lib/local-storage'; // Use local storage functions
 import { Ionicons } from '@expo/vector-icons'; // For icons
 import Toast from 'react-native-toast-message';
+import { useFirebase } from '@/providers/firebase-provider'; // To potentially invalidate Firebase cache on local delete
 
 const LOW_STOCK_THRESHOLD = 10; // Define low stock threshold for UI indication
 
 export default function ProductsScreen() {
     const queryClient = useQueryClient();
+    const { isFirebaseAvailable } = useFirebase();
 
     // Query to get products from local storage
     const { data: products, isLoading, error, refetch, isRefetching } = useQuery<Product[]>({
         queryKey: ['localProducts'], // Unique key for local storage data
         queryFn: getAllProducts,
         staleTime: 1 * 60 * 1000, // Keep data fresh for 1 minute
-        refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes in background
+        // Refetch interval might be excessive if data only changes via user action
+        // refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes in background
     });
 
      // Mutation to delete a product from local storage
@@ -28,10 +31,17 @@ export default function ProductsScreen() {
                 text2: `Product with ID ${productId} removed locally.`,
                 position: 'bottom',
             });
-            queryClient.invalidateQueries({ queryKey: ['localProducts'] }); // Refresh the list
-             // Also try to invalidate Firebase data if it exists (might need specific function)
-            // This might require a separate mutation to delete from Firebase if desired
-            // queryClient.invalidateQueries({ queryKey: ['products'] });
+            // Invalidate local cache
+            queryClient.invalidateQueries({ queryKey: ['localProducts'] });
+
+            // If Firebase is available, also invalidate its product cache,
+            // as the source of truth (local) has changed.
+            // A separate action would be needed to delete from Firebase itself.
+            if (isFirebaseAvailable) {
+                queryClient.invalidateQueries({ queryKey: ['products'] });
+                // Also invalidate notifications as the product is gone
+                queryClient.invalidateQueries({ queryKey: ['notifications'] });
+            }
         },
         onError: (error: any, productId) => {
             Toast.show({
@@ -46,10 +56,10 @@ export default function ProductsScreen() {
     const handleDelete = (id: string, name: string) => {
         Alert.alert(
             "Confirm Deletion",
-            `Are you sure you want to remove "${name}" (ID: ${id}) from local storage? This cannot be undone.`,
+            `Are you sure you want to remove "${name}" (ID: ${id}) from local storage? This action doesn't remove it from Firebase sync (if enabled).`, // Clarify local-only delete
             [
                 { text: "Cancel", style: "cancel" },
-                { text: "Delete", style: "destructive", onPress: () => deleteMutation.mutate(id) }
+                { text: "Delete Locally", style: "destructive", onPress: () => deleteMutation.mutate(id) }
             ],
             { cancelable: true }
         );
@@ -91,7 +101,7 @@ export default function ProductsScreen() {
                 </Text>
                  {item.lastDecremented && (
                     <Text style={styles.itemDetailSmall}>
-                        Consumed: {formatTimestamp(item.lastDecremented)}
+                        Decrement Checked: {formatTimestamp(item.lastDecremented)}
                     </Text>
                  )}
             </View>
@@ -114,7 +124,7 @@ export default function ProductsScreen() {
                     disabled={deleteMutation.isPending && deleteMutation.variables === item.id}
                 >
                      {deleteMutation.isPending && deleteMutation.variables === item.id ? (
-                        <ActivityIndicator size="small" color="#b91c1c" />
+                        <ActivityIndicator size="small" color="#ef4444" /> // Use red color for spinner too
                      ) : (
                         <Ionicons name="trash-bin-outline" size={22} color="#ef4444" /> // Slightly larger icon, red color
                      )}
@@ -164,7 +174,7 @@ export default function ProductsScreen() {
     // --- Product List ---
     return (
         <FlatList
-            data={products.sort((a, b) => a.name.localeCompare(b.name))} // Sort alphabetically by name
+            data={[...products].sort((a, b) => a.name.localeCompare(b.name))} // Sort a copy alphabetically by name
             renderItem={renderProductItem}
             keyExtractor={(item) => item.id}
             style={styles.list}
@@ -196,6 +206,7 @@ const styles = StyleSheet.create({
     listContentContainer: {
         paddingVertical: 10,
         paddingHorizontal: 15,
+        paddingBottom: 30, // Add padding to bottom
     },
     itemContainer: {
         backgroundColor: '#ffffff',

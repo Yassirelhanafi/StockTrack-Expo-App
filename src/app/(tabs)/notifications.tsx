@@ -23,7 +23,7 @@ export default function NotificationsScreen() {
   // --- Mutation to Acknowledge Notification in Firebase ---
   const acknowledgeMutation = useMutation({
       mutationFn: acknowledgeNotification,
-       enabled: isFirebaseAvailable, // Only enable mutation if Firebase is available
+       // Enabled check is implicitly handled by disabling the button if Firebase is not available
       onSuccess: (data, notificationId) => {
           Toast.show({
               type: 'info',
@@ -73,7 +73,7 @@ export default function NotificationsScreen() {
 
  const handleAcknowledge = (item: Notification) => {
     if (!isFirebaseAvailable) {
-        Toast.show({ type: 'error', text1: 'Firebase Unavailable', text2: 'Cannot acknowledge notifications.' });
+        Toast.show({ type: 'error', text1: 'Firebase Unavailable', text2: 'Cannot acknowledge notifications.', position: 'bottom' });
         return;
     }
     acknowledgeMutation.mutate(item.id);
@@ -96,7 +96,7 @@ export default function NotificationsScreen() {
         </View>
          {/* Acknowledge Button */}
         <TouchableOpacity
-            style={[styles.acknowledgeButton, !isFirebaseAvailable && styles.disabledButton]} // Style disabled button
+            style={[styles.acknowledgeButton, (!isFirebaseAvailable || (acknowledgeMutation.isPending && acknowledgeMutation.variables === item.id)) && styles.disabledButton]} // Style disabled button
             onPress={() => handleAcknowledge(item)}
             disabled={!isFirebaseAvailable || (acknowledgeMutation.isPending && acknowledgeMutation.variables === item.id)}
             >
@@ -122,8 +122,8 @@ export default function NotificationsScreen() {
     );
   }
 
-  // Case 2: Firebase available, but query is loading
-  if (isLoading && !isRefetching) {
+  // Case 2: Firebase available, but query is loading (initial load)
+  if (isLoading && status !== 'error' && !isRefetching) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#ff8c00" />
@@ -150,15 +150,20 @@ export default function NotificationsScreen() {
    // Case 4: Firebase available, query successful, but no notifications
    if (!notifications || notifications.length === 0) {
      return (
-      <View style={styles.centered}>
-        <Ionicons name="notifications-off-outline" size={60} color="#9ca3af" style={styles.emptyIcon}/>
-        <Text style={styles.emptyText}>All Clear!</Text>
-         <Text style={styles.emptySubText}>No active low stock alerts.</Text>
-          <TouchableOpacity style={[styles.button, styles.refreshButton]} onPress={() => refetch()}>
-              <Ionicons name="refresh-outline" size={18} color="#fff" />
-              <Text style={styles.buttonText}>Refresh</Text>
-          </TouchableOpacity>
-      </View>
+        <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={refetch}
+            colors={["#ff8c00"]}
+            tintColor={"#ff8c00"}
+            enabled={isFirebaseAvailable}
+        >
+          <View style={styles.centeredEmpty}>
+            <Ionicons name="notifications-off-outline" size={60} color="#9ca3af" style={styles.emptyIcon}/>
+            <Text style={styles.emptyText}>All Clear!</Text>
+             <Text style={styles.emptySubText}>No active low stock alerts.</Text>
+             <Text style={styles.emptySubTextSmall}>(Pull down to refresh)</Text>
+          </View>
+        </RefreshControl>
     );
   }
 
@@ -192,6 +197,14 @@ const styles = StyleSheet.create({
      padding: 20,
      backgroundColor: '#fffaf0', // Very light orange background
   },
+   centeredEmpty: { // Style for empty state within RefreshControl
+    flex: 1, // Take full height if possible (may need adjustment based on parent)
+    minHeight: 300, // Ensure minimum height for visibility
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#fffaf0',
+  },
   list: {
     flex: 1,
     backgroundColor: '#fffaf0', // Background for the list area
@@ -199,6 +212,7 @@ const styles = StyleSheet.create({
    listContentContainer: {
     paddingVertical: 10,
     paddingHorizontal: 15,
+    paddingBottom: 30, // Add padding to bottom
   },
   itemContainer: {
     backgroundColor: '#ffffff', // White background for items
@@ -298,8 +312,14 @@ const styles = StyleSheet.create({
       fontSize: 14,
       color: '#6b7280',
       textAlign: 'center',
-      marginBottom: 25,
+      marginBottom: 10, // Less margin before the next text
        paddingHorizontal: 15,
+  },
+   emptySubTextSmall: {
+      fontSize: 12,
+      color: '#9ca3af', // Lighter gray
+      textAlign: 'center',
+      marginTop: 5,
   },
   button: {
       flexDirection: 'row',
@@ -315,7 +335,7 @@ const styles = StyleSheet.create({
       elevation: 2,
       marginTop: 10,
   },
-   refreshButton: {
+   refreshButton: { // Style not used in empty state anymore
       backgroundColor: '#fb923c', // Orange-400
    },
    retryButton: {

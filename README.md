@@ -1,24 +1,29 @@
 # StockTrack Expo App
 
-This is a React Native application built with Expo to track product inventory. It uses local storage as the primary data source and optionally syncs with Firebase for backup and low-stock notifications.
+This is a React Native application built with Expo to track product inventory. It uses local storage (AsyncStorage) as the primary data source for offline capability and immediate feedback. It optionally syncs with Firebase Firestore for backup and generating low-stock notifications.
 
 ## Features
 
-*   **QR Code Scanning:** Scan product QR codes to quickly add or update inventory (using `expo-camera`).
+*   **QR Code Scanning:** Scan product QR codes using `expo-camera` to quickly add or update inventory. Supports JSON and simple Key:Value formats.
 *   **Manual Entry:** Add or update products manually via a form.
-*   **Local Storage:** Product data is primarily stored on the device using AsyncStorage.
-*   **Firebase Integration (Optional):**
-    *   Syncs product data to Firestore for backup.
-    *   Generates low-stock notifications in Firestore.
-*   **Automatic Quantity Decrement:** Periodically decreases product quantities based on defined consumption rates (runs locally and syncs with Firebase if available).
-*   **Tab Navigation:** Easy navigation between Scan, Products, and Notifications screens using Expo Router.
+*   **Local Storage First:** Product data is always saved to local AsyncStorage first.
+*   **Firebase Integration (Optional but Recommended):**
+    *   Syncs product data (adds/updates) to Firestore for backup and remote access.
+    *   Generates low-stock notifications based on Firestore data.
+    *   Decrements product quantities in Firestore based on defined consumption rates (can be triggered periodically).
+*   **Automatic Quantity Decrement (Client-Side):**
+    *   Periodically decreases product quantities *locally* based on defined consumption rates using a React hook (`usePeriodicSync`). Runs when the app is in the foreground and at set intervals.
+    *   If Firebase is available, the hook *also* triggers a Firebase quantity decrement check.
+*   **Tab Navigation:** Simple navigation between Scan, Products (Local List), and Notifications (Firebase List) screens using Expo Router.
 *   **Pull-to-Refresh:** Refresh product and notification lists.
+*   **Toast Notifications:** User feedback for success and error messages using `react-native-toast-message`.
+*   **Improved UI:** More polished UI elements, loading states, and error handling.
 
 ## Getting Started
 
 ### Prerequisites
 
-*   Node.js (LTS version recommended)
+*   Node.js (LTS version recommended - v18 or higher)
 *   npm or yarn
 *   Expo Go app on your iOS or Android device (for testing) OR an emulator/simulator setup.
 *   Git
@@ -40,16 +45,27 @@ This is a React Native application built with Expo to track product inventory. I
 
 3.  **Configure Firebase (Optional but Recommended):**
     *   Create a Firebase project at [https://console.firebase.google.com/](https://console.firebase.google.com/).
-    *   Enable Firestore database in your project.
-    *   Add a Web app to your Firebase project.
-    *   Copy your Firebase configuration credentials.
+    *   Enable **Firestore Database** in your project (choose Native mode if prompted, select a region).
+    *   **Important:** Set up Firestore **Security Rules**. For initial development, you can use permissive rules (allow read, write: if true;), but **secure these before production**. Example development rules:
+        ```firestore
+        rules_version = '2';
+        service cloud.firestore {
+          match /databases/{database}/documents {
+            // Allow read/write access for development ONLY
+            // TODO: Secure these rules before production!
+            match /{document=**} {
+              allow read, write: if true;
+            }
+          }
+        }
+        ```
+    *   Add a **Web app** to your Firebase project (even though it's a mobile app, we use the Web SDK).
+    *   Copy your Firebase configuration credentials (apiKey, authDomain, projectId, etc.).
     *   Open `app.json` in the project root.
-    *   Find the `extra.firebaseConfig` section and replace the placeholder values (`"YOUR_..."`) with your actual Firebase project credentials.
+    *   Find the `extra` section and replace the placeholder values (`"YOUR_..."`) with your actual Firebase project credentials. Make sure all keys are filled.
         ```json
         "extra": {
-          "eas": {
-            "projectId": "YOUR_EAS_PROJECT_ID" // Optional: For EAS Build
-          },
+          // ... other extra keys ...
           "firebaseApiKey": "YOUR_API_KEY",
           "firebaseAuthDomain": "YOUR_PROJECT_ID.firebaseapp.com",
           "firebaseProjectId": "YOUR_PROJECT_ID",
@@ -58,7 +74,7 @@ This is a React Native application built with Expo to track product inventory. I
           "firebaseAppId": "YOUR_APP_ID"
         }
         ```
-    *   **Important Security Note:** For production apps, consider using environment variables or a more secure method to handle Firebase keys rather than committing them directly in `app.json`, especially if the repository is public. Expo's `extra` config is generally suitable for non-sensitive configuration.
+    *   **Security Note:** Committing keys directly in `app.json` is acceptable for development or internal apps if the repository is private. For public repositories or higher security needs, use environment variables managed via EAS Secrets or other secure configuration methods.
 
 ### Running the App
 
@@ -68,34 +84,34 @@ This is a React Native application built with Expo to track product inventory. I
     # or
     yarn start
     ```
-*   This will open Expo Dev Tools in your browser.
+*   This will open Expo Dev Tools in your browser and show a QR code in the terminal.
 *   **On your device:**
     *   Open the Expo Go app.
-    *   Scan the QR code displayed in the terminal or Dev Tools.
+    *   Scan the QR code.
 *   **On an emulator/simulator:**
     *   Press `a` for Android or `i` for iOS in the terminal where Expo is running.
 *   **In a web browser:**
-    *   Press `w` in the terminal.
+    *   Press `w` in the terminal (Web support might have limitations, especially with native features like the camera).
 
 ## Project Structure
 
 ```
 stocktrack-expo/
+├── assets/              # Static assets (icons, splash screen)
 ├── src/
 │   ├── app/                 # Expo Router routes and layouts
 │   │   ├── (tabs)/          # Screens within the tab navigator
 │   │   │   ├── _layout.tsx  # Tab layout configuration
-│   │   │   ├── index.tsx    # Scan screen
-│   │   │   ├── products.tsx # Products list screen
-│   │   │   └── notifications.tsx # Notifications screen
-│   │   └── _layout.tsx      # Root layout (providers)
-│   ├── assets/              # Static assets (icons, splash screen)
-│   ├── components/          # Reusable UI components (if any)
-│   ├── hooks/               # Custom React hooks (e.g., usePeriodicSync)
+│   │   │   ├── index.tsx    # Scan screen (entry point for tabs)
+│   │   │   ├── products.tsx # Products list screen (Local Data)
+│   │   │   └── notifications.tsx # Notifications screen (Firebase Data)
+│   │   └── _layout.tsx      # Root layout (providers, gesture handler)
+│   ├── hooks/               # Custom React hooks (usePeriodicSync)
 │   ├── lib/                 # Core logic and utilities
 │   │   ├── firebase/        # Firebase interaction (firestore.ts)
 │   │   └── local-storage.ts # AsyncStorage interaction
-│   └── providers/           # React Context providers (Firebase, React Query)
+│   └── providers/           # React Context providers (FirebaseProvider)
+├── .gitignore
 ├── app.json                 # Expo configuration file
 ├── babel.config.js          # Babel configuration
 ├── metro.config.js          # Metro bundler configuration
@@ -106,34 +122,45 @@ stocktrack-expo/
 
 ## Key Libraries
 
-*   **Expo:** Framework for building universal React applications.
+*   **Expo & Expo SDK:** Framework and tools for building universal React apps.
 *   **Expo Router:** File-based routing for React Native & Web.
 *   **React Native:** Core library for building native apps with React.
-*   **React Query (`@tanstack/react-query`):** Data fetching, caching, and state management.
-*   **Firebase JS SDK:** Interacting with Firebase services (Firestore).
-*   **AsyncStorage (`@react-native-async-storage/async-storage`):** Local key-value storage.
-*   **Expo Camera:** Accessing the device camera for scanning.
-*   **React Native Toast Message:** Displaying success/error messages.
+*   **React Query (`@tanstack/react-query`):** Data fetching, caching, mutations, and state management for both local and remote data.
+*   **Firebase JS SDK:** Interacting with Firebase services (specifically Firestore).
+*   **AsyncStorage (`@react-native-async-storage/async-storage`):** Local key-value storage on the device.
+*   **Expo Camera:** Accessing the device camera for scanning QR codes.
+*   **React Native Toast Message:** Displaying success/error/info messages overlay.
 *   **Ionicons (`@expo/vector-icons`):** Icon library.
+*   **React Native Gesture Handler:** Foundation for gesture interactions.
+*   **React Native Reanimated:** Library for animations.
+*   **React Native Safe Area Context:** Handling safe areas on different devices.
 
 ## How Data Sync Works
 
-1.  **Local First:** When scanning or adding manually, data is *always* saved to local AsyncStorage first for immediate feedback and offline capability.
-2.  **Firebase Sync (if configured):** After local save, the app attempts to save/update the same data in Firebase Firestore.
-3.  **Decrement Logic:**
-    *   A hook (`usePeriodicSync`) runs periodically (and on app foreground).
-    *   It first calculates and updates quantities in local storage based on consumption rates.
-    *   If Firebase is configured, it then performs a similar decrement check on Firestore data. This ensures consistency even if the app hasn't been open recently.
-4.  **Notifications:** Low stock checks are performed in Firestore after data updates or during the Firebase decrement process. Active notifications are fetched directly from Firestore.
+1.  **Local First:** When scanning or adding manually, data is *always* saved to local AsyncStorage first. This provides immediate feedback and ensures offline functionality for adding/viewing products.
+2.  **Firebase Sync (if configured & available):**
+    *   After a successful local save, the app attempts to save/update the same product data in Firebase Firestore using `setDoc` with `{ merge: true }`.
+    *   If Firebase sync fails, an error message indicates this, but the local data remains saved.
+3.  **Decrement Logic (`usePeriodicSync` Hook):**
+    *   This hook runs periodically (e.g., every 15 mins for local, 60 mins for Firebase) *and* when the app comes to the foreground.
+    *   **Local:** It first calculates and updates quantities in local storage based on `consumptionRate` and `lastDecremented` time.
+    *   **Firebase (if available):** It then triggers a similar check on Firestore data via the `decrementQuantities` function in `firestore.ts`. This function also updates the corresponding local product if a Firebase decrement occurs.
+4.  **Notifications (Firebase-dependent):**
+    *   Low stock checks (`checkLowStock`) are performed in Firestore *after* a product is added/updated in Firebase or during the Firebase `decrementQuantities` process.
+    *   Notifications are generated/updated/deleted directly in the `notifications` collection in Firestore based on stock levels and acknowledged status.
+    *   The Notifications tab fetches *only* from Firestore (`getLowStockNotifications`), showing active (unacknowledged) alerts. Acknowledging updates the document in Firestore.
+5.  **Data Viewing:**
+    *   The "Products" tab displays data fetched *only* from local AsyncStorage (`getAllProducts`).
+    *   The "Notifications" tab displays data fetched *only* from Firebase Firestore (`getLowStockNotifications`).
 
-## TODO / Potential Improvements
+## Potential Improvements / TODO
 
-*   Implement Firebase Authentication for user-specific data.
-*   Add more robust error handling for network issues during Firebase sync.
-*   Implement background tasks for more reliable quantity decrementing (requires Expo Application Services - EAS).
-*   Add unit and integration tests.
-*   Improve UI/UX design.
-*   Allow editing of existing products.
-*   Add settings screen (e.g., configure low stock threshold).
-```
-
+*   **Firebase Delete Sync:** When deleting locally, optionally trigger a delete in Firebase as well.
+*   **Edit Functionality:** Allow editing existing product details (name, rate).
+*   **More Robust Error Handling:** Specific handling for network errors vs. Firebase rule errors. Retry mechanisms for failed Firebase syncs.
+*   **Background Sync (Advanced):** Implement true background tasks for quantity decrementing using EAS Build and background task libraries (more reliable than client-side intervals).
+*   **Authentication:** Add Firebase Authentication to manage user-specific data. Secure Firestore rules based on user UID.
+*   **UI/UX:** Further polish the UI, add animations, improve form validation feedback.
+*   **Testing:** Add unit and integration tests.
+*   **Settings Screen:** Allow configuration of `LOW_STOCK_THRESHOLD`, sync intervals, etc.
+*   **Web Compatibility:** Improve camera handling and storage fallback for better web support if needed.

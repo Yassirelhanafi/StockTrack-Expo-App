@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { usePeriodicSync } from '@/hooks/use-periodic-sync'; // Import the hook
@@ -13,7 +13,7 @@ export default function TabLayout() {
         <Tabs
             screenOptions={({ route }) => ({
                 tabBarIcon: ({ focused, color, size }) => {
-                    let iconName;
+                    let iconName: React.ComponentProps<typeof Ionicons>['name'] = 'help-circle-outline'; // Fallback type
 
                     if (route.name === 'index') { // Scan Tab
                         iconName = focused ? 'scan-circle' : 'scan-circle-outline';
@@ -21,11 +21,10 @@ export default function TabLayout() {
                         iconName = focused ? 'list-circle' : 'list-circle-outline';
                     } else if (route.name === 'notifications') { // Notifications Tab
                         iconName = focused ? 'notifications' : 'notifications-outline';
-                    } else {
-                        iconName = 'help-circle-outline'; // Fallback
                     }
 
-                    return <Ionicons name={iconName as any} size={size} color={color} />;
+                    // You can return any component that you like here!
+                    return <Ionicons name={iconName} size={size} color={color} />;
                 },
                 tabBarActiveTintColor: '#006400', // Dark Green
                 tabBarInactiveTintColor: '#888888', // Lighter Gray
@@ -43,10 +42,10 @@ export default function TabLayout() {
                  },
                 headerShown: true, // Keep headers shown
                  headerStyle: {
-                    // backgroundColor: '#f8f8f8', // Example header background color
+                    backgroundColor: '#f8f8f8', // Example header background color
                  },
                  headerTitleStyle: {
-                    // fontWeight: 'bold', // Example header title style
+                    fontWeight: 'bold', // Example header title style
                  },
             })}
         >

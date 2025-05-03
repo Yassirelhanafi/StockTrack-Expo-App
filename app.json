@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "StockTrack",
-    "slug": "stocktrack",
+    "slug": "stocktrack-expo",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,40 +13,44 @@
     },
     "ios": {
       "supportsTablet": true,
-       "infoPlist": {
+      "bundleIdentifier": "com.yourcompany.stocktrack",
+      "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan product QR codes."
-      },
-       "bundleIdentifier": "com.yourcompany.stocktrack"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "package": "com.yourcompany.stocktrack",
        "permissions": [
         "android.permission.CAMERA"
-      ],
-      "package": "com.yourcompany.stocktrack"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png",
-       "bundler": "metro"
+      "favicon": "./assets/favicon.png"
     },
-     "plugins": [
+    "plugins": [
       "expo-router"
     ],
     "scheme": "stocktrack",
-     "extra": {
-      "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID"
-      },
-       "firebaseApiKey": "YOUR_API_KEY",
-       "firebaseAuthDomain": "YOUR_PROJECT_ID.firebaseapp.com",
-       "firebaseProjectId": "YOUR_PROJECT_ID",
-       "firebaseStorageBucket": "YOUR_PROJECT_ID.appspot.com",
-       "firebaseMessagingSenderId": "YOUR_SENDER_ID",
-       "firebaseAppId": "YOUR_APP_ID"
+    "experiments": {
+      "typedRoutes": true
     },
-    "owner": "your-expo-username"
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "YOUR_EAS_PROJECT_ID_HERE"
+      },
+      "firebaseApiKey": "YOUR_API_KEY",
+      "firebaseAuthDomain": "YOUR_PROJECT_ID.firebaseapp.com",
+      "firebaseProjectId": "YOUR_PROJECT_ID",
+      "firebaseStorageBucket": "YOUR_PROJECT_ID.appspot.com",
+      "firebaseMessagingSenderId": "YOUR_SENDER_ID",
+      "firebaseAppId": "YOUR_APP_ID"
+    }
   }
 }
