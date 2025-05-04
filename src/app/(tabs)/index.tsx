@@ -55,35 +55,41 @@ export default function ScanScreen() {
         setIsProcessing(true); // Show loading indicator
         const now = new Date();
 
-        // 1. Prepare data for Local Storage (uses ISO strings for dates)
-        const productForLocal: LocalProduct = {
-            id: product.id,
-            name: product.name,
-            quantity: product.quantity,
-            consumptionRate: product.consumptionRate,
-            lastUpdated: now.toISOString(),
-            // Set initial lastDecremented time if rate exists, otherwise undefined
-            lastDecremented: product.consumptionRate ? now.toISOString() : undefined,
-        };
+        // // 1. Prepare data for Local Storage (uses ISO strings for dates)
+        // const productForLocal: LocalProduct = {
+        //     id: product.id,
+        //     name: product.name,
+        //     quantity: product.quantity,
+        //     consumptionRate: product.consumptionRate,
+        //     lastUpdated: now.toISOString(),
+        //     // Set initial lastDecremented time if rate exists, otherwise undefined
+        //     lastDecremented: product.consumptionRate ? now.toISOString() : undefined,
+        // };
 
          // 2. Prepare Firebase data only if Firebase is available (uses Date objects)
-         let productForFirebase: (Omit<FirebaseProduct, 'lastUpdated' | 'lastDecremented'> & { lastUpdated: Date, lastDecremented?: Date }) | null = null;
+         let productForFirebase: (Omit<FirebaseProduct, 'lastUpdated' | 'lastDecremented'> & { lastUpdated: Date, lastDecremented?: Date}) | null = null;
          if (isFirebaseAvailable) {
-              productForFirebase = {
-                 id: product.id,
-                 name: product.name,
-                 quantity: product.quantity,
-                 consumptionRate: product.consumptionRate,
-                 lastUpdated: now, // Use Date object for Firebase Timestamp conversion later
-                 lastDecremented: product.consumptionRate ? now : undefined,
-             };
+            const firebaseData: any = {
+              id: product.id,
+              name: product.name,
+              quantity: product.quantity,
+              lastUpdated: now // Use Date object for Firebase Timestamp conversion later
+            };
+          
+            // Only add consumptionRate if it exists (avoid undefined values in Firebase)
+            if (product.consumptionRate) {
+                firebaseData.consumptionRate = product.consumptionRate;
+                firebaseData.lastDecremented = now; // Only set lastDecremented if we have a consumption rate
+            }
+            
+            productForFirebase = firebaseData;
          }
 
 
         try {
             // A. Save to Local Storage (Mandatory first step)
-            await storeProduct(productForLocal);
-            console.log('Product stored locally:', product.id);
+            // await storeProduct(productForLocal);
+            // console.log('Product stored locally:', product.id);
 
             // B. Attempt to save to Firebase (Optional step)
             let firebaseError = null;
@@ -102,7 +108,7 @@ export default function ScanScreen() {
 
              // If Firebase sync failed, throw a specific error
              if (firebaseError) {
-                 throw new Error(`Local save OK, but Firebase sync failed: ${firebaseError.message || 'Unknown Firebase error'}`);
+                 throw new Error(`Firebase sync failed: ${firebaseError.message || 'Unknown Firebase error'}`);
              }
 
             return product; // Return original product data on full success
@@ -124,7 +130,7 @@ export default function ScanScreen() {
             position: 'bottom',
         });
         // Invalidate local product list query cache
-        queryClient.invalidateQueries({ queryKey: ['localProducts'] });
+        // queryClient.invalidateQueries({ queryKey: ['localProducts'] });
         // Invalidate Firebase query caches ONLY if Firebase was involved
         if (isFirebaseAvailable) {
             queryClient.invalidateQueries({ queryKey: ['products'] }); // Firebase product list
@@ -140,13 +146,13 @@ export default function ScanScreen() {
         console.error('Mutation error:', error);
         // Determine the error message based on what failed
         let toastMessage = 'Failed to process product.';
-        if (error.message?.startsWith('Local save OK')) {
-            // Specific error for Firebase failure after local success
-            toastMessage = `Locally saved, but Firebase sync failed. Check connection/config.`;
-        } else if (error.message?.includes('locally')) {
-            // Error likely from local storage save step
-             toastMessage = `Failed to save product locally. Please try again.`;
-        }
+        // if (error.message?.startsWith('Local save OK')) {
+        //     // Specific error for Firebase failure after local success
+        //     toastMessage = `Locally saved, but Firebase sync failed. Check connection/config.`;
+        // } else if (error.message?.includes('locally')) {
+        //     // Error likely from local storage save step
+        //      toastMessage = `Failed to save product locally. Please try again.`;
+        // }
 
         // Show error toast
         Toast.show({
@@ -279,7 +285,7 @@ const parseConsumptionRate = (
             return product as ProductData;
         } else {
             // If key:value parsing also failed or rate was invalid
-             console.error('Invalid QR code data format:', decodedText);
+             //console.error('Invalid QR code data format:', decodedText);
              const baseError = 'Invalid QR format. Need JSON or "id:_,name:_,qty:_" format.';
              const finalError = rateParseError ? `${baseError} Check rate format.` : baseError;
              setErrorMessage(finalError);
@@ -481,7 +487,7 @@ const parseConsumptionRate = (
           ) : (
              // Placeholder shown when not scanning or when processing data
              <View style={styles.placeholder}>
-                 <Ionicons name={isProcessing ? "hourglass-outline" : "camera-outline"} size={50} color="#888" />
+                 <Ionicons name={isProcessing ? "hourglass-outline" : "scan-outline"} size={50} color="#888" />
                  <Text style={styles.placeholderText}>{isProcessing ? "Saving..." : "Scanner Off"}</Text>
              </View>
           )
@@ -489,12 +495,12 @@ const parseConsumptionRate = (
        </View>
 
        {/* --- Error Message Display Area --- */}
-        {errorMessage && (
+        {/* {errorMessage && (
              <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle-outline" size={18} color={styles.errorText.color} />
                 <Text style={styles.errorText}>{errorMessage}</Text>
              </View>
-        )}
+        )} */}
 
         {/* --- Scan Control Buttons --- */}
         <View style={styles.buttonContainer}>
@@ -570,7 +576,7 @@ const parseConsumptionRate = (
                  {(isProcessing || mutation.isPending) ? (
                      <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
                  ) : (
-                     <Ionicons name="add-circle-outline" size={20} color="#fff" />
+                     <Ionicons name="add-outline" size={20} color="#fff" />
                  )}
                  {/* Change button text based on state */}
                  <Text style={styles.buttonText}>
@@ -660,10 +666,10 @@ const styles = StyleSheet.create({
       minWidth: 150, // Ensure buttons have decent width
   },
   primaryButton: { // Style for primary actions (scan, add)
-      backgroundColor: '#006400', // Dark Green
+      backgroundColor: '#0375FA', // Dark Green
   },
   stopButton: { // Style for stop scan button
-       backgroundColor: '#b91c1c', // Red
+       backgroundColor: '#FF1F31', // Red
   },
    disabledButton: { // Style for disabled buttons
       backgroundColor: '#9ca3af', // Gray

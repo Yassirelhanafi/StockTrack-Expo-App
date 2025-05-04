@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, RefreshControl, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, RefreshControl, Alert, ScrollView } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getLowStockNotifications, acknowledgeNotification, type Notification } from '@/lib/firebase/firestore'; // Firebase functions for notifications
 import { Timestamp } from 'firebase/firestore'; // Firestore Timestamp type
@@ -107,14 +107,9 @@ export default function NotificationsScreen() {
     <View style={styles.itemContainer}>
         {/* Left side: Text content */}
         <View style={styles.itemTextContainer}>
-            <Text style={styles.itemTitle}>
-                 {/* Icon indicating warning */}
-                 <Ionicons name="warning-outline" size={16} color={styles.itemTitle.color} />
-                 {/* Product Name */}
-                 {' '}Low Stock: {item.productName}
-            </Text>
+            <Text style={styles.itemTitle}>Low Stock: {item.productName}</Text>
             <Text style={styles.itemDescription}>
-                Current Quantity: {item.quantity} (ID: {item.productId})
+                Current Quantity: {item.quantity}
             </Text>
             <Text style={styles.itemTimestamp}>
                 Alert Time: {formatTimestamp(item.timestamp)}
@@ -187,21 +182,24 @@ export default function NotificationsScreen() {
    if (!notifications || notifications.length === 0) {
      // Wrap empty state in RefreshControl for pull-to-refresh capability
      return (
-        <RefreshControl
+        <ScrollView
+        contentContainerStyle={styles.centeredEmpty} // Style for centering content
+        refreshControl={
+          <RefreshControl
             refreshing={isRefetching} // Show spinner if refetching
             onRefresh={refetch} // Call refetch on pull
             colors={["#fb923c"]} // Spinner color Android
             tintColor={"#fb923c"} // Spinner color iOS
-            enabled={isFirebaseAvailable} // Should always be true here, but good practice
-        >
-           {/* Use a View that attempts to center content vertically */}
-          <View style={styles.centeredEmpty}>
-            <Ionicons name="notifications-off-outline" size={60} color="#9ca3af" style={styles.emptyIcon}/>
-            <Text style={styles.emptyText}>All Clear!</Text>
-             <Text style={styles.emptySubText}>No active low stock alerts.</Text>
-             <Text style={styles.emptySubTextSmall}>(Pull down to refresh)</Text>
-          </View>
-        </RefreshControl>
+            enabled={isFirebaseAvailable} // Ensure it only works when Firebase is available
+          />
+        }
+      >
+        {/* Empty State Content */}
+        <Ionicons name="notifications-off-outline" size={60} color="#9ca3af" style={styles.emptyIcon} />
+        <Text style={styles.emptyText}>All Clear!</Text>
+        <Text style={styles.emptySubText}>No active low stock alerts.</Text>
+        <Text style={styles.emptySubTextSmall}>(Pull down to refresh)</Text>
+      </ScrollView>
     );
   }
 
@@ -234,7 +232,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
      padding: 20,
-     backgroundColor: '#fffaf0', // Light orange background
+     backgroundColor: '#f0f2f5', // Light orange background
   },
    centeredEmpty: { // Style for centered content within the scrollable area (empty list)
     flexGrow: 1, // Allow it to grow to fill space if list is short
@@ -242,11 +240,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#fffaf0', // Consistent background
+    backgroundColor: '#f0f2f5', // Consistent background
   },
   list: { // Style for the FlatList container
     flex: 1,
-    backgroundColor: '#fffaf0',
+    backgroundColor: '#f0f2f5',
   },
    listContentContainer: { // Inner container style for FlatList content
     paddingVertical: 10,
@@ -277,9 +275,9 @@ const styles = StyleSheet.create({
   itemTitle: { // Style for the main title (Low Stock: ...)
     fontSize: 16,
     fontWeight: '600',
-    color: '#c2410c', // Darker orange
+    color: '#F28B16', // Darker orange
     marginBottom: 4,
-    // flexDirection: 'row', // Not needed if icon is inline with text
+    flexDirection: 'row', // Not needed if icon is inline with text
     alignItems: 'center', // Align icon and text if icon wasn't inline
   },
   itemDescription: { // Style for quantity/ID text

@@ -16,7 +16,7 @@ import {
   type Firestore, // Firestore type definition
 } from 'firebase/firestore';
 import { getApps, type FirebaseApp } from 'firebase/app'; // For checking Firebase initialization
-import { updateLocalProductQuantity } from '@/lib/local-storage'; // Function to update local quantity
+//import { updateLocalProductQuantity } from '@/lib/local-storage'; // Function to update local quantity
 
 // --- Type Definitions ---
 
@@ -170,6 +170,33 @@ export const getProducts = async (): Promise<Product[]> => {
 };
 
 
+export const removeProduct = async (productId: string): Promise<void> => {
+    const db = getDb();
+    
+    if (!db) {
+      return Promise.reject(new Error("Firebase Firestore is not available or configured correctly."));
+    }
+  
+    try {
+      // Step 2: Delete from Firestore (Firebase)
+      const productRef = doc(db, 'products', productId);
+      await deleteDoc(productRef);
+      console.log(`Product ${productId} deleted from Firebase.`);
+  
+      // OPTIONAL: Delete related notifications from Firebase Firestore
+      const notificationsRef = collection(db, 'notifications');
+      const q = query(notificationsRef, where('productId', '==', productId));
+      const snapshot = await getDocs(q);
+      const deletions = snapshot.docs.map(docSnap => deleteDoc(doc(db, 'notifications', docSnap.id)));
+      await Promise.all(deletions);
+      console.log(`Related notifications for product ${productId} deleted from Firebase.`);
+  
+    } catch (error) {
+      console.error(`Error removing product ${productId}: `, error);
+      throw new Error(`Failed to remove product ${productId}: ${error.message}`);
+    }
+  };
+
 // --- Automatic Decrement Logic (Firestore version) ---
 
 /**
@@ -271,9 +298,9 @@ export const decrementQuantities = async (): Promise<void> => {
                   // --- Sync change back to local storage (fire-and-forget) ---
                   // Attempt to update the local quantity immediately.
                   // Log errors but don't let local update failure block Firebase logic.
-                  updateLocalProductQuantity(product.id, newQuantity)
-                      .then(() => console.log(`Synced Firebase decrement to local storage for ${product.id}.`))
-                      .catch(e => console.error(`Error syncing Firebase decrement to local storage for ${product.id}:`, e));
+                //   updateLocalProductQuantity(product.id, newQuantity)
+                //       .then(() => console.log(`Synced Firebase decrement to local storage for ${product.id}.`))
+                //       .catch(e => console.error(`Error syncing Firebase decrement to local storage for ${product.id}:`, e));
                   // --- End local sync ---
 
               } else if (product.quantity > 0 && periodsPassed > 0) {

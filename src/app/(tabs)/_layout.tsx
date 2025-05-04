@@ -17,9 +17,9 @@ export default function TabLayout() {
 
                     // Determine icon based on route name
                     if (route.name === 'index') { // Scan Tab
-                        iconName = focused ? 'scan-circle' : 'scan-circle-outline';
+                        iconName = focused ? 'scan-circle' : 'scan-outline';
                     } else if (route.name === 'products') { // Products Tab
-                        iconName = focused ? 'list-circle' : 'list-circle-outline';
+                        iconName = focused ? 'albums' : 'albums-outline';
                     } else if (route.name === 'notifications') { // Notifications Tab
                         iconName = focused ? 'notifications' : 'notifications-outline';
                     }
@@ -27,8 +27,8 @@ export default function TabLayout() {
                     // Return the Ionicons component
                     return <Ionicons name={iconName} size={size} color={color} />;
                 },
-                tabBarActiveTintColor: '#006400', // Dark Green for active tab
-                tabBarInactiveTintColor: '#888888', // Gray for inactive tab
+                tabBarActiveTintColor: '#006AFF', // Dark Green for active tab
+                tabBarInactiveTintColor: '#0782F5', // Gray for inactive tab
                 tabBarStyle: {
                     // Basic styling for the tab bar (optional)
                     // backgroundColor: '#ffffff',

@@ -4,7 +4,7 @@
     "slug": "stocktrack-expo",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./src/assets/images/stockwatch_white.png",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",
@@ -20,7 +20,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./src/assets/images/stockwatch_white.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.yourcompany.stocktrack",
@@ -29,7 +29,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./src/assets/images/stockwatch_white.png",
        "bundler": "metro"
     },
     "plugins": [

@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getAllProducts, removeProduct, type Product } from '@/lib/local-storage'; // Use local storage functions ONLY
+import { getProducts, removeProduct, type Product } from '@/lib/firebase/firestore'; // Use firebase
 import { Ionicons } from '@expo/vector-icons'; // Icons
 import Toast from 'react-native-toast-message'; // Feedback toasts
 import { useFirebase } from '@/providers/firebase-provider'; // Import to potentially invalidate Firebase cache if needed
@@ -12,39 +12,32 @@ export default function ProductsScreen() {
     const queryClient = useQueryClient(); // React Query client
     const { isFirebaseAvailable } = useFirebase(); // Check Firebase status (used for cache invalidation only)
 
-    // --- React Query to fetch products from Local Storage ---
-    const { data: products, isLoading, error, refetch, isRefetching } = useQuery<Product[]>({
-        queryKey: ['localProducts'], // Unique key for local storage product data
-        queryFn: getAllProducts, // Function to fetch from AsyncStorage
-        staleTime: 1 * 60 * 1000, // Data considered fresh for 1 minute
-        // refetchInterval: 5 * 60 * 1000, // Optional: Refetch periodically in background
+    // --- React Query to fetch products from firebase ---
+    const { data: products, isLoading, error, refetch, isRefetching, status } = useQuery<Product[]>({
+        queryKey: ['Products'], // Unique key for firebase product data
+        queryFn: getProducts, // Function to fetch data
+        staleTime: 30 * 1000, // Data considered fresh for 30 seconds
+        refetchInterval: 60 * 1000, // Automatically refetch every 60 seconds
+        enabled: isFirebaseAvailable, // *Only* run this query if Firebase is available
     });
 
-     // --- React Query Mutation to delete a product from Local Storage ---
-    const deleteMutation = useMutation({
-        mutationFn: removeProduct, // Function to call from local-storage.ts
+     // --- React Query Mutation to delete a product from firebase ---
+     const deleteMutation = useMutation({
+        mutationFn: removeProduct, // Function to remove the product from Firebase
         onSuccess: (data, productId) => {
             // Show success feedback
             Toast.show({
                 type: 'info', // Use 'info' type for deletion confirmation
                 text1: 'Product Removed',
-                text2: `Product "${productId}" removed from local storage.`, // Provide ID
+                text2: `Product "${productId}" removed from Firebase.`,
                 position: 'bottom',
             });
-            // Invalidate the local product list cache to refresh the UI
-            queryClient.invalidateQueries({ queryKey: ['localProducts'] });
-
-            // OPTIONAL: If Firebase is used, deleting locally might mean we *also* want
-            // to invalidate the Firebase cache, assuming a full sync mechanism isn't
-            // immediately deleting from Firebase too. This prevents potentially stale
-            // data showing up elsewhere if the user navigates quickly.
-            // A more robust solution would involve syncing the delete action to Firebase.
+    
+            // Invalidate Firebase product and notifications queries to refresh the UI
             if (isFirebaseAvailable) {
-                // Invalidate Firebase products query
                 queryClient.invalidateQueries({ queryKey: ['products'] });
-                // Invalidate Firebase notifications query (as the product is gone)
                 queryClient.invalidateQueries({ queryKey: ['notifications'] });
-                console.log("Invalidated Firebase products/notifications cache due to local delete.");
+                console.log("Invalidated Firebase products/notifications cache due to deletion.");
             }
         },
         onError: (error: any, productId) => {
@@ -52,8 +45,8 @@ export default function ProductsScreen() {
             Toast.show({
                 type: 'error',
                 text1: 'Deletion Failed',
-                text2: error.message || `Could not remove product ${productId} locally.`,
-                 position: 'bottom',
+                text2: error.message || `Could not remove product ${productId} from Firebase.`,
+                position: 'bottom',
             });
         },
     });
@@ -65,12 +58,12 @@ export default function ProductsScreen() {
         Alert.alert(
             "Confirm Deletion", // Alert Title
              // Alert Message - clarify it's a local delete only
-            `Remove "${name}" (ID: ${id}) from local storage?\n\nThis action ONLY removes the item from this device's storage. It does NOT automatically remove it from Firebase sync (if enabled).`,
+            `Remove "${name}" (ID: ${id}) ?\n\nThis action will not be rolled back`,
             [
                 // Buttons
                 { text: "Cancel", style: "cancel" }, // Does nothing on cancel
                 {
-                    text: "Delete Locally",
+                    text: "Delete",
                     style: "destructive", // iOS red text for destructive action
                     onPress: () => deleteMutation.mutate(id) // Trigger mutation on confirm
                 }
@@ -166,13 +159,13 @@ export default function ProductsScreen() {
         return (
             <View style={styles.centered}>
                 <ActivityIndicator size="large" color="#006400" />
-                <Text style={styles.loadingText}>Loading Local Products...</Text>
+                <Text style={styles.loadingText}>Loading Products...</Text>
             </View>
         );
     }
 
     // 2. Error State
-    if (error) {
+    if (status === 'error') {
         return (
             <View style={styles.centered}>
                 <Ionicons name="alert-circle-outline" size={40} color="#b91c1c" style={styles.errorIcon}/>
@@ -188,30 +181,28 @@ export default function ProductsScreen() {
         );
     }
 
-    // 3. Empty State (No products found locally)
     if (!products || products.length === 0) {
-         // Wrap empty state in RefreshControl for consistency
         return (
-             <RefreshControl
-                refreshing={isRefetching}
-                onRefresh={refetch}
-                colors={["#006400"]}
-                tintColor={"#006400"}
-             >
-                <View style={styles.centeredEmpty}>
-                    <Ionicons name="file-tray-stacked-outline" size={50} color="#9ca3af" style={styles.emptyIcon} />
-                    <Text style={styles.emptyText}>No Products Stored Locally</Text>
-                    <Text style={styles.emptySubText}>Scan a QR code or add items manually on the 'Scan' tab to get started.</Text>
-                    {/* Optional: Add a refresh button even when empty */}
-                    {/* <TouchableOpacity style={[styles.button, styles.primaryButton]} onPress={() => refetch()}>
-                        <Ionicons name="refresh-outline" size={18} color="#fff" />
-                        <Text style={styles.buttonText}>Refresh</Text>
-                    </TouchableOpacity> */}
-                     <Text style={styles.emptySubTextSmall}>(Pull down to refresh)</Text>
-                </View>
-             </RefreshControl>
+            <ScrollView
+                contentContainerStyle={styles.centeredEmpty} // Align content in the center
+                refreshControl={
+                    <RefreshControl
+                        refreshing={isRefetching} // Show spinner if refetching in background
+                        onRefresh={refetch} // Function to call on pull
+                        colors={["#30BF30"]} // Android spinner color (dark green)
+                        tintColor={"#30BF30"} // iOS spinner color (dark green)
+                        enabled={isFirebaseAvailable} // Enable if Firebase is available
+                    />
+                }
+            >
+                <Ionicons name="file-tray-stacked-outline" size={50} color="#9ca3af" style={styles.emptyIcon} />
+                <Text style={styles.emptyText}>No Products</Text>
+                <Text style={styles.emptySubText}>Scan a QR code or add items manually on the 'Scan' tab to get started.</Text>
+                <Text style={styles.emptySubTextSmall}>(Pull down to refresh)</Text>
+            </ScrollView>
         );
     }
+    
 
     // 4. Success State (Products found, display list)
     return (
@@ -318,8 +309,8 @@ const styles = StyleSheet.create({
         borderColor: '#fca5a5', // Red border
     },
     normalStockBadge: { // Style applied when stock is normal
-        backgroundColor: '#f3f4f6', // Light gray background
-        borderColor: '#d1d5db', // Gray border
+        backgroundColor: '#B4EDCA', // Light green background
+        borderColor: '#22C55E', // Gray border
     },
      lowStockText: { // Text style within the low stock badge
         fontWeight: 'bold',
@@ -329,7 +320,7 @@ const styles = StyleSheet.create({
     normalStockText: { // Text style within the normal stock badge
         fontWeight: 'bold',
         fontSize: 14,
-         color: '#374151', // Dark gray text
+         color: '#22C55E', // Dark green text
    },
     deleteButton: { // Style for the delete button (touchable area)
         padding: 8, // Increase touchable area around the icon
