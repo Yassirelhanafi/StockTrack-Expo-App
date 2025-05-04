@@ -335,7 +335,7 @@ const parseConsumptionRate = (
     }
 
     Alert.alert(
-      'Confirm Product', // Alert Title
+      'Confirm Product\n', // Alert Title
       message, // Alert Message (product details)
       [
         // Buttons
@@ -346,7 +346,7 @@ const parseConsumptionRate = (
             setIsScanning(false); // Ensure scanning stops
             setErrorMessage(null);
         }},
-        { text: 'Confirm & Save', onPress: () => mutation.mutate(product) }, // Trigger mutation on confirm
+        { text: 'Save', onPress: () => mutation.mutate(product) }, // Trigger mutation on confirm
       ],
       { cancelable: false } // Prevent dismissing alert by tapping outside
     );
@@ -584,7 +584,18 @@ const parseConsumptionRate = (
                  </Text>
              </TouchableOpacity>
         </View>
-
+        {/* QR Code Format Information */}
+        <View style={styles.qrInfoContainer}>
+            <Text style={styles.qrInfoTitle}>QR Code Format</Text>
+            <Text style={styles.qrInfoText}>
+                Scan QR codes containing product data in JSON format:
+            </Text>
+            <View style={styles.codeExample}>
+                <Text style={styles.codeText}>
+                    {`{\n  "id": "prod123",\n  "name": "Product Name",\n  "quantity": 10,\n  "consumptionRate": "2 per day"\n}`}
+                </Text>
+            </View>
+        </View>
         {/* Spacer at the bottom to ensure content doesn't hide behind tab bar */}
         <View style={{ height: 50 }} />
 
@@ -666,7 +677,7 @@ const styles = StyleSheet.create({
       minWidth: 150, // Ensure buttons have decent width
   },
   primaryButton: { // Style for primary actions (scan, add)
-      backgroundColor: '#0375FA', // Dark Green
+      backgroundColor: '#0375FA', // blue
   },
   stopButton: { // Style for stop scan button
        backgroundColor: '#FF1F31', // Red
@@ -752,5 +763,46 @@ const styles = StyleSheet.create({
    },
    manualAddButton: { // Specific margin for manual add button
        marginTop: 10,
-   }
+   },
+   // QR Code Format Information section
+  qrInfoContainer: {
+    width: '95%',
+    maxWidth: 400,
+    marginTop: 20,
+    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderLeftWidth: 5,
+    borderLeftColor: '#0375FA',
+  },
+  qrInfoTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 8,
+  },
+  qrInfoText: {
+    fontSize: 14,
+    color: '#444',
+    marginBottom: 8,
+  },
+  codeExample: {
+    backgroundColor: '#2c3e50',
+    padding: 12,
+    borderRadius: 6,
+    marginVertical: 8,
+  },
+  codeText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 12,
+    color: '#e7f5ff',
+  },
+  qrInfoNote: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    color: '#666',
+    marginTop: 6,
+  },
 });

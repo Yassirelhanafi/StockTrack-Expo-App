@@ -17,7 +17,7 @@ export default function TabLayout() {
 
                     // Determine icon based on route name
                     if (route.name === 'index') { // Scan Tab
-                        iconName = focused ? 'scan-circle' : 'scan-outline';
+                        iconName = focused ? 'scan-circle' : 'scan-circle-outline';
                     } else if (route.name === 'products') { // Products Tab
                         iconName = focused ? 'albums' : 'albums-outline';
                     } else if (route.name === 'notifications') { // Notifications Tab

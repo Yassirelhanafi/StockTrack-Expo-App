@@ -58,9 +58,9 @@ export default function ProductsScreen() {
     // Shows a confirmation dialog before deleting a product
     const handleDelete = (id: string, name: string) => {
         Alert.alert(
-            "Confirm Deletion", // Alert Title
+            "Confirm Deletion\n", // Alert Title
              // Alert Message - clarify it's a local delete only
-            `Remove "${name}" (ID: ${id}) ?\n\nThis action will not be rolled back`,
+            `Remove "${name}" (ID: ${id}) ?\nThis action will not be rolled back`,
             [
                 // Buttons
                 { text: "Cancel", style: "cancel" }, // Does nothing on cancel
