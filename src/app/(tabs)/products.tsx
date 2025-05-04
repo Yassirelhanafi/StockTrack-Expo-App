@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getProducts, removeProduct, type Product } from '@/lib/firebase/firestore'; // Use firebase
 import { Ionicons } from '@expo/vector-icons'; // Icons
 import Toast from 'react-native-toast-message'; // Feedback toasts
-import { useFirebase } from '@/providers/firebase-provider'; // Import to potentially invalidate Firebase cache if needed
+import { useFirebase } from '@/providers/firebase-provider';
+import { Timestamp } from 'firebase/firestore'; // Import to potentially invalidate Firebase cache if needed
 
 const LOW_STOCK_THRESHOLD = 10; // Threshold for highlighting low stock quantity
 
@@ -39,6 +40,7 @@ export default function ProductsScreen() {
                 queryClient.invalidateQueries({ queryKey: ['notifications'] });
                 console.log("Invalidated Firebase products/notifications cache due to deletion.");
             }
+            refetch();
         },
         onError: (error: any, productId) => {
             // Show error feedback
@@ -81,20 +83,14 @@ export default function ProductsScreen() {
     };
 
     // Formats ISO date strings from local storage into readable format
-    const formatTimestamp = (timestamp: Product['lastUpdated'] | Product['lastDecremented']): string => {
-        if (!timestamp) return 'N/A';
-        try {
-            // Assume timestamp is an ISO 8601 string
-            const date = new Date(timestamp as string);
-            // Check if parsing resulted in a valid date
-            if (isNaN(date.getTime())) {
-                return 'Invalid Date';
-            }
-            return date.toLocaleString(); // Use locale-specific date/time format
-        } catch (e) {
-            console.error("Error formatting timestamp:", e, "Value:", timestamp);
-            return 'Error';
+    const formatTimestamp = (timestamp) => {
+        if (timestamp instanceof Timestamp) {
+            // Convert Firebase Timestamp to Date object
+            const date = timestamp.toDate();
+            // Now format the Date object using your preferred format
+            return date.toLocaleString(); // Example formatting, you can use date-fns or moment.js
         }
+        return 'Invalid Date'; // Fallback for invalid or empty timestamps
     };
 
     // --- Render Function for Each Product Item in the FlatList ---
