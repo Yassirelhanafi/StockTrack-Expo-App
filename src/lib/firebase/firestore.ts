@@ -27,8 +27,10 @@ export interface Product {
   quantity: number;
   consumptionRate?: {
     amount: number;
-    unit: 'day' | 'week' | 'month';
+    period: number;
+    unit: 'hour' | 'day' | 'week' | 'month';
   };
+  minStockLevel: number;
   lastUpdated: Timestamp; // Firestore Timestamp
   lastDecremented?: Timestamp | null; // Firestore Timestamp or null
 }
@@ -44,7 +46,7 @@ export interface Notification {
 }
 
 // Threshold for triggering low stock notifications
-const LOW_STOCK_THRESHOLD = 10;
+// const LOW_STOCK_THRESHOLD = 10;
 
 // --- Firestore Instance Management ---
 
@@ -219,8 +221,9 @@ export const decrementQuantities = async (): Promise<void> => {
   // Query for products that have a consumptionRate defined and have quantity > 0
   const q = query(productsRef,
       where('consumptionRate', '!=', null), // Field must exist and not be null
-      where('quantity', '>', 0) // Only process items that have stock
+      where('quantity', '>', 0) // Only process items that have stockr
     );
+
 
   const batch = writeBatch(db); // Use a batch for efficient updates
   const now = new Date();
@@ -233,6 +236,7 @@ export const decrementQuantities = async (): Promise<void> => {
   console.log(`Firebase: Running decrement check at ${now.toISOString()}...`);
 
   try {
+      console.log(`Firebase: Fetching products for decrement check...`);
       const querySnapshot = await getDocs(q);
       console.log(`Firebase: Found ${querySnapshot.docs.length} products with rate and quantity > 0 to check.`);
 
@@ -257,22 +261,28 @@ export const decrementQuantities = async (): Promise<void> => {
            }
 
           // Should not happen due to query, but safety checks
-          if (!rate || !rate.amount || rate.amount <= 0 || product.quantity <= 0) return;
+          if (!rate || !rate.amount || rate.amount <= 0 || rate.period <=0 || product.quantity <= 0) return;
+
+          const period = rate.period && rate.period > 0 ? rate.period : 1;
 
           // Calculate time difference and periods passed
           const diffTime = now.getTime() - lastDecrementedDate.getTime();
-          if (diffTime <= 0) return; // No time passed or clock skew
+          if (diffTime <= 0) {
+              return product; // No time passed or potential clock skew
+          }
 
-          const diffDays = diffTime / (1000 * 60 * 60 * 24);
+          const diffhours = diffTime / (1000 * 60 * 60);
           let periodsPassed = 0;
 
-          if (rate.unit === 'day') {
-              periodsPassed = Math.floor(diffDays);
+          if (rate.unit === 'hour') {
+              periodsPassed = Math.floor(diffhours/period);
+          } else if (rate.unit === 'day') {
+              periodsPassed = Math.floor(diffhours / (24*period));
           } else if (rate.unit === 'week') {
-              periodsPassed = Math.floor(diffDays / 7);
+              periodsPassed = Math.floor(diffhours / (7*24*period));
           } else if (rate.unit === 'month') {
-              // Approximate using average days in a month
-              periodsPassed = Math.floor(diffDays / 30.4375);
+              // Approximate using average days in month
+              periodsPassed = Math.floor(diffhours / (30.4375*24*period));
           }
 
 
@@ -329,7 +339,7 @@ export const decrementQuantities = async (): Promise<void> => {
           await Promise.all(
              productsToCheckStock.map(p =>
                  // Call checkLowStock, catching individual errors so one failure doesn't stop others
-                 checkLowStock(p.id, p.newQuantity, p.name)
+                 checkLowStock(p.id, p.newQuantity, p.name,)
                      .catch(e => console.error(`Error during post-decrement low stock check for ${p.id}:`, e))
              )
           );
@@ -358,7 +368,7 @@ export const decrementQuantities = async (): Promise<void> => {
  * @param productName Optional: The product name (avoids an extra Firestore read if known).
  * @returns Promise resolving when the check is complete.
  */
-export const checkLowStock = async (productId: string, currentQuantity?: number, productName?: string): Promise<void> => {
+export const checkLowStock = async (productId: string, currentQuantity?: number, productName?: string, productMinStockLevel?: number ): Promise<void> => {
     const db = getDb();
     if (!db) {
         console.warn(`Firebase Firestore not available, skipping low stock check for ${productId}.`);
@@ -372,9 +382,10 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
     try {
         let quantity: number;
         let name: string;
+        let minStockLevel: number;
 
         // Fetch product data from Firestore if quantity or name wasn't provided
-        if (currentQuantity === undefined || productName === undefined) {
+        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined) {
             console.log(`Fetching product data for ${productId} to check stock...`);
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
@@ -387,10 +398,12 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
             const productData = productSnap.data() as Omit<Product, 'id'>;
             quantity = productData.quantity;
             name = productData.name;
+            minStockLevel = productData.minStockLevel;
         } else {
             // Use provided quantity and name
             quantity = currentQuantity;
             name = productName;
+            minStockLevel = productMinStockLevel
         }
 
         // Fetch existing notification (if any) to check its 'acknowledged' status
@@ -401,10 +414,10 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
         // --- Logic: Create/Update or Delete Notification ---
 
         // Case 1: Stock is LOW
-        if (quantity < LOW_STOCK_THRESHOLD) {
+        if (quantity < minStockLevel) {
             // Only create/update the notification if it's NOT already acknowledged
             if (!isAcknowledged) {
-                 console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity}. Creating/Updating notification.`);
+                 console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
                  // Prepare notification data
                  const notificationData: Omit<Notification, 'id'> = {
                     productId: productId,

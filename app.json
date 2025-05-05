@@ -46,12 +46,12 @@
       "eas": {
         "projectId": "YOUR_EAS_PROJECT_ID_HERE"
       },
-      "firebaseApiKey": "AIzaSyAG3QNjxIuSjnMtZvAgzcaByKW3vrZBYdo",
-      "firebaseAuthDomain": "stock-track-d0986.firebaseapp.com",
-      "firebaseProjectId": "stock-track-d0986",
-      "firebaseStorageBucket": "stock-track-d0986.firebasestorage.app",
-      "firebaseMessagingSenderId": "150259064182",
-      "firebaseAppId": "1:150259064182:web:c2377a325219c522be2e57"
+      "firebaseApiKey": "AIzaSyBvMZSiXMhbBSYWzMV0VUA4qhoeu0UCNVU",
+      "firebaseAuthDomain": "stocktrack-expo-app.firebaseapp.com",
+      "firebaseProjectId": "stocktrack-expo-app",
+      "firebaseStorageBucket": "stocktrack-expo-app.firebasestorage.app",
+      "firebaseMessagingSenderId": "1081577006078",
+      "firebaseAppId": "1:1081577006078:web:0c7da72ddb4e26f08196af"
     }
   }
 }

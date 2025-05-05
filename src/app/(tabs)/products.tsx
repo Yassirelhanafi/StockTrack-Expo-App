@@ -7,7 +7,6 @@ import Toast from 'react-native-toast-message'; // Feedback toasts
 import { useFirebase } from '@/providers/firebase-provider';
 import { Timestamp } from 'firebase/firestore'; // Import to potentially invalidate Firebase cache if needed
 
-const LOW_STOCK_THRESHOLD = 10; // Threshold for highlighting low stock quantity
 
 export default function ProductsScreen() {
     const queryClient = useQueryClient(); // React Query client
@@ -79,7 +78,8 @@ export default function ProductsScreen() {
     // Formats the consumption rate object into a readable string
     const formatConsumptionRate = (rate: Product['consumptionRate']) => {
         if (!rate || typeof rate !== 'object' || !rate.amount || !rate.unit) return 'N/A';
-        return `${rate.amount} / ${rate.unit}`;
+        const period = rate.period ?? 1;
+        return `${rate.amount} / ${period} ${rate.unit}`;
     };
 
     // Formats ISO date strings from local storage into readable format
@@ -105,6 +105,9 @@ export default function ProductsScreen() {
                 </Text>
                 {/* Display timestamps if available */}
                 <Text style={styles.itemDetailSmall}>
+                    Minimum Stock Level : {item.minStockLevel}
+                </Text>
+                <Text style={styles.itemDetailSmall}>
                     Updated: {formatTimestamp(item.lastUpdated)}
                 </Text>
                  {item.lastDecremented && (
@@ -120,11 +123,11 @@ export default function ProductsScreen() {
                 <View style={[
                     styles.quantityBadge,
                     // Apply low stock style if quantity is below threshold
-                    item.quantity < LOW_STOCK_THRESHOLD ? styles.lowStockBadge : styles.normalStockBadge
+                    item.quantity < item.minStockLevel ? styles.lowStockBadge : styles.normalStockBadge
                 ]}>
                     <Text style={
                         // Apply different text style for low stock
-                        item.quantity < LOW_STOCK_THRESHOLD ? styles.lowStockText : styles.normalStockText
+                        item.quantity < item.minStockLevel ? styles.lowStockText : styles.normalStockText
                     }>
                         {item.quantity}
                     </Text>

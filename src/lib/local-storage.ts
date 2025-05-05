@@ -12,8 +12,10 @@ export interface Product {
   quantity: number;
   consumptionRate?: {
     amount: number;
-    unit: 'day' | 'week' | 'month';
+    period : number;
+    unit: 'hour' | 'day' | 'week' | 'month';
   };
+  minStockLevel?: number;
   lastUpdated: string; // Date stored as ISO 8601 string format
   lastDecremented?: string; // Date stored as ISO 8601 string format
 }
@@ -244,9 +246,11 @@ export const decrementLocalQuantities = async (): Promise<void> => {
 
 
     // Skip calculation if: no rate, quantity is zero, rate amount invalid, or rate unit invalid
-    if (!rate || product.quantity <= 0 || !rate.amount || rate.amount <= 0 || !['day', 'week', 'month'].includes(rate.unit)) {
+    if (!rate || product.quantity <= 0 || !rate.amount || rate.amount <= 0 || !['hour','day', 'week', 'month'].includes(rate.unit)) {
         return product; // No change needed
     }
+
+    const period = rate.period && rate.period > 0 ? rate.period : 1;
 
     // Calculate time difference and periods passed
     const diffTime = now.getTime() - lastDecrementedDate.getTime();
@@ -254,16 +258,18 @@ export const decrementLocalQuantities = async (): Promise<void> => {
         return product; // No time passed or potential clock skew
     }
 
-    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+    const diffhours = diffTime / (1000 * 60 * 60);
     let periodsPassed = 0;
 
-    if (rate.unit === 'day') {
-        periodsPassed = Math.floor(diffDays);
+    if (rate.unit === 'hour') {
+        periodsPassed = Math.floor(diffhours/period);
+    } else if (rate.unit === 'day') {
+        periodsPassed = Math.floor(diffhours / (24*period));
     } else if (rate.unit === 'week') {
-        periodsPassed = Math.floor(diffDays / 7);
+        periodsPassed = Math.floor(diffhours / (7*24*period));
     } else if (rate.unit === 'month') {
         // Approximate using average days in month
-        periodsPassed = Math.floor(diffDays / 30.4375);
+        periodsPassed = Math.floor(diffhours / (30.4375*24*period));
     }
 
 

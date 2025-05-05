@@ -10,7 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@expo/vector-icons": "^14.0.0",
+    "@expo/vector-icons": "^14.1.0",
     "@firebase/auth": "^1.10.1",
     "@firebase/firestore": "^4.7.11",
     "@firebase/functions": "^0.12.3",
@@ -37,7 +37,9 @@
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.10.0",
     "react-native-toast-message": "^2.2.0",
-    "react-native-web": "^0.20.0"
+    "react-native-vector-icons": "^10.2.0",
+    "react-native-web": "^0.20.0",
+    "expo-notifications": "~0.31.1"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

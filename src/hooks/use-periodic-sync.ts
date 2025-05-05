@@ -5,8 +5,8 @@ import { decrementLocalQuantities } from '@/lib/local-storage'; // Local decreme
 import { decrementQuantities as decrementFirebaseQuantities } from '@/lib/firebase/firestore'; // Firebase decrement function
 import { useFirebase } from '@/providers/firebase-provider'; // Hook to check Firebase status
 
-const LOCAL_DECREMENT_INTERVAL = 15 * 60 * 1000; // Check local storage every 15 minutes
-const FIREBASE_DECREMENT_INTERVAL = 60 * 60 * 1000; // Check Firebase every 60 minutes (less frequent)
+const LOCAL_DECREMENT_INTERVAL =   5 * 1000; // Check local storage every 15 minutes
+const FIREBASE_DECREMENT_INTERVAL =  5 * 1000; // Check Firebase every 60 minutes (less frequent)
 // Flag to control if sync runs immediately when app comes to foreground
 const SYNC_ON_FOREGROUND = true;
 // Add a buffer to prevent running tasks too close together if intervals/foreground events overlap

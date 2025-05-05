@@ -11,20 +11,22 @@ import { useFirebase } from '@/providers/firebase-provider'; // Hook to check Fi
 // Regex for parsing consumption rate strings (e.g., "5 per day")
 // Allows number, space(s), "per", "every", or "/", space(s), unit (day/week/month)
 // Added escape for '/'
-const CONSUMPTION_RATE_REGEX = /^(\d+)\s*(?:per\s*)?(day|week|month)$/i;
+const CONSUMPTION_RATE_REGEX = /^(\d+)\s*(?:per\s*(\d+)?\s*)?(hour|day|week|month)s?$/i;
 
-const LOW_STOCK_THRESHOLD = 10; // Define a threshold for low stock alerts
+
 
 type ConsumptionRate = {
   amount: number;
-  unit: 'day' | 'week' | 'month';
-};
+  period?: number;
+  unit: 'hour' |'day' | 'week' | 'month';
+};                                        
 // Interface for product data used within this component
 interface ProductData {
   id: string;
   name: string;
   quantity: number;
   consumptionRate?: ConsumptionRate;
+  minStockLevel: number;
   // Timestamps (lastUpdated, lastDecremented) are added right before saving
 }
 
@@ -42,6 +44,7 @@ export default function ScanScreen() {
   const [manualId, setManualId] = useState('');
   const [manualName, setManualName] = useState('');
   const [manualQuantity, setManualQuantity] = useState('');
+  const [manualMinStockLevel, setManualMinStockLevel] = useState('');
   const [manualRate, setManualRate] = useState('');
 
   const queryClient = useQueryClient(); // React Query client for cache invalidation
@@ -73,6 +76,7 @@ export default function ScanScreen() {
               id: product.id,
               name: product.name,
               quantity: product.quantity,
+              minStockLevel : product.minStockLevel,
               lastUpdated: now // Use Date object for Firebase Timestamp conversion later
             };
           
@@ -185,24 +189,28 @@ export default function ScanScreen() {
  * - "3 week" → { amount: 3, unit: "week" }
  */
 const parseConsumptionRate = (
-  rateString: string
+    rateString: string
 ): ProductData['consumptionRate'] | undefined => {
-  if (!rateString) return undefined;
+    if (!rateString) return undefined;
 
-  const match = rateString.trim().match(CONSUMPTION_RATE_REGEX);
-  if (match) {
-    const amount = parseInt(match[1], 10);
-    const unitRaw = match[2]; // corrected index: second capturing group
-    if (!isNaN(amount) && unitRaw) {
-      const unit = unitRaw.toLowerCase();
-      if (['day', 'week', 'month'].includes(unit)) {
-        return { amount, unit } as ProductData['consumptionRate'];
-      }
+    const match = rateString.trim().match(CONSUMPTION_RATE_REGEX);
+    if (match) {
+        const amount = parseInt(match[1], 10);
+        const periodRaw = match[2]; // peut être undefined
+        const unitRaw = match[3];
+
+        if (!isNaN(amount) && unitRaw) {
+            const unit = unitRaw.toLowerCase() as ConsumptionRate['unit'];
+            if (['hour', 'day', 'week', 'month'].includes(unit)) {
+                const period = periodRaw ? parseInt(periodRaw, 10) : 1; // défaut à 1
+                return { amount, period, unit } as ProductData['consumptionRate']; ;
+            }
+        }
     }
-  }
 
-  return undefined;
+    return undefined;
 };
+
 
 
    // Parses data from a scanned QR code (supports JSON or simple Key:Value)
@@ -212,31 +220,44 @@ const parseConsumptionRate = (
         // Attempt 1: Parse as JSON
         const data = JSON.parse(decodedText);
         // Validate required fields in JSON object
-        if (data.id && data.name && typeof data.quantity === 'number') {
+        if (data.id && data.name && typeof data.quantity === 'number' && typeof data.minStockLevel === 'number') {
             const product: ProductData = {
                 id: String(data.id),
                 name: String(data.name),
                 quantity: data.quantity,
+                minStockLevel: data.minStockLevel
             };
             // Parse consumption rate if present (can be string or object in JSON)
             if (data.consumptionRate) {
                 if (typeof data.consumptionRate === 'string') {
                     product.consumptionRate = parseConsumptionRate(data.consumptionRate);
-                     // If rate string exists but fails parsing, return null
-                     if (product.consumptionRate === undefined) return null;
-                } else if (typeof data.consumptionRate === 'object' && data.consumptionRate.amount && data.consumptionRate.unit) {
-                     const amount = parseInt(data.consumptionRate.amount, 10);
-                     const unit = String(data.consumptionRate.unit).toLowerCase();
-                     if (!isNaN(amount) && ['day', 'week', 'month'].includes(unit)) {
-                         product.consumptionRate = {
-                            amount: amount,
-                            unit: unit as 'day' | 'week' | 'month'
-                         };
-                     } else {
-                         console.warn("Invalid consumptionRate object in JSON:", data.consumptionRate);
-                         setErrorMessage('Invalid consumptionRate object in JSON.');
-                         return null; // Invalid rate object
-                     }
+                    if (product.consumptionRate === undefined) {
+                        console.warn("Failed to parse consumptionRate string:", data.consumptionRate);
+                        setErrorMessage('Invalid consumptionRate string format.');
+                        return null;
+                    }
+                } else if (typeof data.consumptionRate === 'object') {
+                    const { amount, period, unit } = data.consumptionRate;
+
+                    const parsedAmount = parseInt(amount, 10);
+                    const parsedPeriod = period !== undefined ? parseInt(period, 10) : 1; // valeur par défaut : 1
+                    const parsedUnit = String(unit).toLowerCase();
+
+                    const isValidUnit = ['hour', 'day', 'week', 'month'].includes(parsedUnit);
+                    const isValidAmount = !isNaN(parsedAmount);
+                    const isValidPeriod = !isNaN(parsedPeriod);
+
+                    if (isValidAmount && isValidPeriod && isValidUnit) {
+                        product.consumptionRate = {
+                            amount: parsedAmount,
+                            period: parsedPeriod,
+                            unit: parsedUnit as 'hour' | 'day' | 'week' | 'month'
+                        };
+                    } else {
+                        console.warn("Invalid consumptionRate object in JSON:", data.consumptionRate);
+                        setErrorMessage('Invalid consumptionRate object in JSON.');
+                        return null;
+                    }
                 }
             }
             return product; // Successfully parsed JSON
@@ -247,8 +268,8 @@ const parseConsumptionRate = (
         // Attempt 2: Parse as simple Key:Value string (e.g., "id:123,name:Thing,qty:10,rate:5 per day")
         console.log("QR data is not valid JSON, attempting Key:Value parse...", e);
         const parts = decodedText.split(',');
-        const product: Partial<ProductData> & { id?: string; name?: string; quantity?: number } = {};
-        let foundId = false, foundName = false, foundQty = false;
+        const product: Partial<ProductData> & { id?: string; name?: string; quantity?: number; minStockLevel?: number } = {};
+        let foundId = false, foundName = false, foundQty = false, foundMinStockLevel = false;
         let rateParseError = false; // Flag for rate parsing issues
 
         parts.forEach((part) => {
@@ -268,6 +289,12 @@ const parseConsumptionRate = (
                         product.quantity = qty;
                         foundQty = true;
                     }
+                } else if (trimmedKey === 'minStockLevel') {
+                    const minStock = parseInt(value, 10);
+                    if (!isNaN(minStock)) {
+                        product.minStockLevel = minStock;
+                        foundMinStockLevel = true;
+                    }
                 } else if (trimmedKey === 'rate' || trimmedKey === 'consumptionrate') {
                     const parsedRate = parseConsumptionRate(value);
                     if (parsedRate === undefined) {
@@ -280,7 +307,7 @@ const parseConsumptionRate = (
         });
 
         // Validate Key:Value results
-        if (foundId && foundName && foundQty && product.id && product.name && product.quantity !== undefined && !rateParseError) {
+        if (foundId && foundName && foundQty && foundMinStockLevel && product.id && product.name && product.quantity !== undefined && product.minStockLevel !== undefined && !rateParseError) {
             // Required fields found and rate (if present) parsed correctly
             return product as ProductData;
         } else {
@@ -325,12 +352,12 @@ const parseConsumptionRate = (
 
    // Shows an Alert dialog to confirm the scanned/entered product details
    const showConfirmationAlert = (product: ProductData) => {
-    let message = `ID: ${product.id}\nName: ${product.name}\nQuantity: ${product.quantity}`;
+    let message = `ID: ${product.id}\nName: ${product.name}\nQuantity: ${product.quantity}\nMin Stock Level: ${product.minStockLevel}`;
     if (product.consumptionRate) {
-      message += `\nRate: ${product.consumptionRate.amount} per ${product.consumptionRate.unit}`;
+      message += `\nRate: ${product.consumptionRate.amount} per ${product.consumptionRate.period} ${product.consumptionRate.unit}`;
     }
     // Add a warning if the quantity is below the threshold
-    if (product.quantity < LOW_STOCK_THRESHOLD) {
+    if (product.quantity < product.minStockLevel) {
         message += "\n\nWarning: Low Stock!";
     }
 
@@ -395,8 +422,9 @@ const parseConsumptionRate = (
   const handleManualAdd = () => {
      // Basic validation for required fields
      const quantityNum = parseInt(manualQuantity, 10);
-     if (!manualId.trim() || !manualName.trim() || isNaN(quantityNum) || quantityNum < 0) {
-         Alert.alert("Validation Error", "Please provide a unique Product ID, Name, and a valid non-negative Quantity.");
+     const MinSlevel = parseInt(manualMinStockLevel, 10);
+     if (!manualId.trim() || !manualName.trim() || isNaN(quantityNum) || quantityNum < 0 || isNaN(MinSlevel) || MinSlevel < 0) {
+         Alert.alert("Validation Error", "Please provide a unique Product ID, Name, and a valid non-negative for Quantity and Min Stock Level.");
          return;
      }
 
@@ -416,6 +444,7 @@ const parseConsumptionRate = (
         id: manualId.trim(),
         name: manualName.trim(),
         quantity: quantityNum,
+        minStockLevel: MinSlevel,
         consumptionRate: consumptionRate, // Will be undefined if not entered/parsed
     };
 
@@ -429,6 +458,7 @@ const parseConsumptionRate = (
         setManualId('');
         setManualName('');
         setManualQuantity('');
+        setManualMinStockLevel('');
         setManualRate('');
         setErrorMessage(null); // Also clear any validation errors displayed
    }
@@ -548,6 +578,15 @@ const parseConsumptionRate = (
                 placeholderTextColor="#aaa"
                 editable={!isProcessing}
             />
+            <TextInput
+                style={styles.input}
+                placeholder="Minimum Stock Level"
+                value={manualMinStockLevel}
+                onChangeText={setManualMinStockLevel}
+                keyboardType="numeric" // Show numeric keyboard
+                placeholderTextColor="#aaa"
+                editable={!isProcessing}
+            />
              <TextInput
                 style={styles.input}
                 placeholder="Consumption Rate (Optional)"
@@ -558,7 +597,7 @@ const parseConsumptionRate = (
                 editable={!isProcessing}
             />
              {/* Helper text for rate format */}
-             <Text style={styles.inputHelper}>e.g., "5 per day", "10 / week", "1 / month"</Text>
+             <Text style={styles.inputHelper}>e.g.,"4 per hour","3 per 8 hour", "5 per day", "10 / week", "1 / month"</Text>
 
               {/* Manual Add/Update Button */}
               <TouchableOpacity
@@ -592,7 +631,7 @@ const parseConsumptionRate = (
             </Text>
             <View style={styles.codeExample}>
                 <Text style={styles.codeText}>
-                    {`{\n  "id": "prod123",\n  "name": "Product Name",\n  "quantity": 10,\n  "consumptionRate": "2 per day"\n}`}
+                    {`{\n  "id": "prod123",\n  "name": "Product Name",\n  "quantity": 10,\n  "minStockLevel": 3,\n  "consumptionRate": "2 per 3 day"\n}`}
                 </Text>
             </View>
         </View>
