@@ -284,161 +284,170 @@ export const updateProductQuantity = async (
  * @returns Promise resolving when the operation is complete.
  */
 export const decrementQuantities = async (): Promise<void> => {
-  const db = getDb();
-  if (!db) {
-    console.warn("Firebase Firestore not available, skipping Firestore quantity decrement check.");
-    return; // Exit if DB not available
-  }
+    const db = getDb();
+    if (!db) {
+        console.warn("Firebase Firestore not available, skipping Firestore quantity decrement check.");
+        return; // Exit if DB not available
+    }
 
-  const productsRef = collection(db, 'products');
-  // Query for products that have a consumptionRate defined and have quantity > 0
-  const q = query(productsRef,
-      where('consumptionRate', '!=', null), // Field must exist and not be null
-      where('quantity', '>', 0) // Only process items that have stockr
+    // Vérification de l'heure actuelle pour éviter les décrements entre 22h00 et 8h00
+    const now = new Date();
+    const currentHour = now.getHours();
+
+    // Si l'heure actuelle est entre 22h00 et 8h00, on ne fait pas de décrement
+    if (currentHour >= 21 || currentHour < 7) {
+        console.log(`Firebase: Skipping decrement check at ${now.toISOString()} - outside of active hours (21:00-07:00).`);
+        return;
+    }
+
+    const productsRef = collection(db, 'products');
+    // Query for products that have a consumptionRate defined and have quantity > 0
+    const q = query(productsRef,
+        where('consumptionRate', '!=', null), // Field must exist and not be null
+        where('quantity', '>', 0) // Only process items that have stockr
     );
 
 
-  const batch = writeBatch(db); // Use a batch for efficient updates
-  const now = new Date();
-  const nowTimestamp = Timestamp.fromDate(now); // Current time as Firestore Timestamp
-  let updatesMade = 0; // Count how many products were actually updated
-  // Store products whose stock changed to check notifications later
-  const productsToCheckStock: { id: string, name: string | undefined, newQuantity: number }[] = [];
+    const batch = writeBatch(db); // Use a batch for efficient updates
+    const nowTimestamp = Timestamp.fromDate(now); // Current time as Firestore Timestamp
+    let updatesMade = 0; // Count how many products were actually updated
+    // Store products whose stock changed to check notifications later
+    const productsToCheckStock: { id: string, name: string | undefined, newQuantity: number }[] = [];
 
 
-  console.log(`Firebase: Running decrement check at ${now.toISOString()}...`);
+    console.log(`Firebase: Running decrement check at ${now.toISOString()}...`);
 
-  try {
-      console.log(`Firebase: Fetching products for decrement check...`);
-      const querySnapshot = await getDocs(q);
-      console.log(`Firebase: Found ${querySnapshot.docs.length} products with rate and quantity > 0 to check.`);
+    try {
+        console.log(`Firebase: Fetching products for decrement check...`);
+        const querySnapshot = await getDocs(q);
+        console.log(`Firebase: Found ${querySnapshot.docs.length} products with rate and quantity > 0 to check.`);
 
-      querySnapshot.forEach((docSnap) => {
+        querySnapshot.forEach((docSnap) => {
 
-          const product = { id: docSnap.id, ...docSnap.data() } as Product;
-          console.log(`processing ddddddddddddddddddddddd ${product.lastDecremented}`)
-          const rate = product.consumptionRate;
+            const product = { id: docSnap.id, ...docSnap.data() } as Product;
+            console.log(`processing ddddddddddddddddddddddd ${product.lastDecremented}`)
+            const rate = product.consumptionRate;
 
-          // Get the last decremented date, default to distant past if invalid/missing
-          let lastDecrementedDate = new Date(0); // Start with epoch
-          if (product.lastDecremented instanceof Timestamp) {
-              lastDecrementedDate = product.lastDecremented.toDate();
-              console.log(`time =${product.lastDecremented.toDate()}`)
+            // Get the last decremented date, default to distant past if invalid/missing
+            let lastDecrementedDate = new Date(0); // Start with epoch
+            if (product.lastDecremented instanceof Timestamp) {
+                lastDecrementedDate = product.lastDecremented.toDate();
+                console.log(`time =${product.lastDecremented.toDate()}`)
 
-          } else if (product.lastDecremented === null) {
-               // If explicitly null, treat as never decremented before for calculation
-               lastDecrementedDate = new Date(0);
-           } else if (product.lastDecremented) {
-               // Handle potential malformed data (e.g., old string/number format) - try parsing
-               try {
-                   const parsed = new Date(product.lastDecremented as any);
-                   if (!isNaN(parsed.getTime())) lastDecrementedDate = parsed;
-                   else console.warn(`Firebase: Invalid lastDecremented format for ${product.id}, defaulting.`);
-               } catch { console.warn(`Firebase: Error parsing lastDecremented for ${product.id}, defaulting.`); }
-           }
+            } else if (product.lastDecremented === null) {
+                // If explicitly null, treat as never decremented before for calculation
+                lastDecrementedDate = new Date(0);
+            } else if (product.lastDecremented) {
+                // Handle potential malformed data (e.g., old string/number format) - try parsing
+                try {
+                    const parsed = new Date(product.lastDecremented as any);
+                    if (!isNaN(parsed.getTime())) lastDecrementedDate = parsed;
+                    else console.warn(`Firebase: Invalid lastDecremented format for ${product.id}, defaulting.`);
+                } catch { console.warn(`Firebase: Error parsing lastDecremented for ${product.id}, defaulting.`); }
+            }
 
-          // Should not happen due to query, but safety checks
-          if (!rate || !rate.amount || rate.amount <= 0 || rate.period <=0 || product.quantity <= 0) return;
+            // Should not happen due to query, but safety checks
+            if (!rate || !rate.amount || rate.amount <= 0 || rate.period <=0 || product.quantity <= 0) return;
 
-          const period = rate.period && rate.period > 0 ? rate.period : 1;
+            const period = rate.period && rate.period > 0 ? rate.period : 1;
 
-          // Calculate time difference and periods passed
-          const diffTime = now.getTime() - lastDecrementedDate.getTime();
-          console.log(now.getTime())
-          console.log(`${diffTime}`)
-          if (diffTime <= 0) {
-              return product; // No time passed or potential clock skew
-          }
+            // Calculate time difference and periods passed
+            const diffTime = now.getTime() - lastDecrementedDate.getTime();
+            console.log(now.getTime())
+            console.log(`${diffTime}`)
+            if (diffTime <= 0) {
+                return product; // No time passed or potential clock skew
+            }
 
-          const diffhours = diffTime / (1000 * 60 * 60);
+            const diffhours = diffTime / (1000 * 15);
 
-          console.log(`${diffhours}`)
-          let periodsPassed = 0;
+            console.log(`${diffhours}`)
+            let periodsPassed = 0;
 
-          if (rate.unit === 'hour') {
-              periodsPassed = Math.floor(diffhours/period);
-          } else if (rate.unit === 'day') {
-              periodsPassed = Math.floor(diffhours / (24*period));
-          } else if (rate.unit === 'week') {
-              periodsPassed = Math.floor(diffhours / (7*24*period));
-          } else if (rate.unit === 'month') {
-              // Approximate using average days in month
-              periodsPassed = Math.floor(diffhours / (30.4375*24*period));
-          }
+            if (rate.unit === 'hour') {
+                periodsPassed = Math.floor(diffhours/period);
+            } else if (rate.unit === 'day') {
+                periodsPassed = Math.floor(diffhours / (24*period));
+            } else if (rate.unit === 'week') {
+                periodsPassed = Math.floor(diffhours / (7*24*period));
+            } else if (rate.unit === 'month') {
+                // Approximate using average days in month
+                periodsPassed = Math.floor(diffhours / (30.4375*24*period));
+            }
 
 
-          if (periodsPassed > 0) {
-              const quantityToDecrement = periodsPassed * rate.amount;
-              console.log(`${periodsPassed}`)
-              console.log(`${rate.amount}`)
-              // Calculate new quantity, ensuring it doesn't go below zero
-              const newQuantity = Math.max(0, product.quantity - quantityToDecrement);
+            if (periodsPassed > 0) {
+                const quantityToDecrement = periodsPassed * rate.amount;
+                console.log(`${periodsPassed}`)
+                console.log(`${rate.amount}`)
+                // Calculate new quantity, ensuring it doesn't go below zero
+                const newQuantity = Math.max(0, product.quantity - quantityToDecrement);
 
-              // If quantity actually changed
-              if (newQuantity < product.quantity) {
-                  console.log(`Firebase: Decrementing ${product.name} (${product.id}) by ${quantityToDecrement}. Old: ${product.quantity}, New: ${newQuantity}`);
-                  const productDocRef = doc(db, 'products', product.id);
-                  // Add update operation to the batch
-                  batch.update(productDocRef, {
-                      quantity: newQuantity,
-                      lastDecremented: nowTimestamp, // Update last decremented time
-                      lastUpdated: nowTimestamp,     // Also update general last updated time
-                  });
-                  updatesMade++;
-                  // Add to list for low stock check after commit
-                  productsToCheckStock.push({ id: product.id, name: product.name, newQuantity });
+                // If quantity actually changed
+                if (newQuantity < product.quantity) {
+                    console.log(`Firebase: Decrementing ${product.name} (${product.id}) by ${quantityToDecrement}. Old: ${product.quantity}, New: ${newQuantity}`);
+                    const productDocRef = doc(db, 'products', product.id);
+                    // Add update operation to the batch
+                    batch.update(productDocRef, {
+                        quantity: newQuantity,
+                        lastDecremented: nowTimestamp, // Update last decremented time
+                        lastUpdated: nowTimestamp,     // Also update general last updated time
+                    });
+                    updatesMade++;
+                    // Add to list for low stock check after commit
+                    productsToCheckStock.push({ id: product.id, name: product.name, newQuantity });
 
-                  // --- Sync change back to local storage (fire-and-forget) ---
-                  // Attempt to update the local quantity immediately.
-                  // Log errors but don't let local update failure block Firebase logic.
-                //   updateLocalProductQuantity(product.id, newQuantity)
-                //       .then(() => console.log(`Synced Firebase decrement to local storage for ${product.id}.`))
-                //       .catch(e => console.error(`Error syncing Firebase decrement to local storage for ${product.id}:`, e));
-                  // --- End local sync ---
+                    // --- Sync change back to local storage (fire-and-forget) ---
+                    // Attempt to update the local quantity immediately.
+                    // Log errors but don't let local update failure block Firebase logic.
+                    //   updateLocalProductQuantity(product.id, newQuantity)
+                    //       .then(() => console.log(`Synced Firebase decrement to local storage for ${product.id}.`))
+                    //       .catch(e => console.error(`Error syncing Firebase decrement to local storage for ${product.id}:`, e));
+                    // --- End local sync ---
 
-              } else if (product.quantity > 0 && periodsPassed > 0) {
-                  // Case: Time has passed, but calculated decrement is 0 or less.
-                  // We should still update the `lastDecremented` timestamp to prevent
-                  // re-calculating needlessly in the next run.
-                  console.log(`Firebase: Updating lastDecremented for ${product.name} (${product.id}) as time passed but quantity unchanged.`);
-                   const productDocRef = doc(db, 'products', product.id);
+                } else if (product.quantity > 0 && periodsPassed > 0) {
+                    // Case: Time has passed, but calculated decrement is 0 or less.
+                    // We should still update the `lastDecremented` timestamp to prevent
+                    // re-calculating needlessly in the next run.
+                    console.log(`Firebase: Updating lastDecremented for ${product.name} (${product.id}) as time passed but quantity unchanged.`);
+                    const productDocRef = doc(db, 'products', product.id);
                     batch.update(productDocRef, {
                         lastDecremented: nowTimestamp,
                         // Optionally update lastUpdated here too if desired
                     });
                     // Don't increment updatesMade or check stock if only timestamp updated
-              }
-          }
-      });
+                }
+            }
+        });
 
-      // Commit the batch if any updates were added
-      if (updatesMade > 0) {
-          await batch.commit();
-          console.log(`Firebase: Batch commit successful for ${updatesMade} product quantity updates.`);
+        // Commit the batch if any updates were added
+        if (updatesMade > 0) {
+            await batch.commit();
+            console.log(`Firebase: Batch commit successful for ${updatesMade} product quantity updates.`);
 
-          // --- Check Low Stock for Affected Products ---
-          // Run checkLowStock concurrently for all products whose quantity changed.
-          console.log(`Firebase: Checking low stock status for ${productsToCheckStock.length} updated products...`);
-          await Promise.all(
-             productsToCheckStock.map(p =>
-                 // Call checkLowStock, catching individual errors so one failure doesn't stop others
-                 checkLowStock(p.id, p.newQuantity, p.name,)
-                     .catch(e => console.error(`Error during post-decrement low stock check for ${p.id}:`, e))
-             )
-          );
-          console.log("Firebase: Post-decrement low stock checks complete.");
-          // --- End Low Stock Check ---
+            // --- Check Low Stock for Affected Products ---
+            // Run checkLowStock concurrently for all products whose quantity changed.
+            console.log(`Firebase: Checking low stock status for ${productsToCheckStock.length} updated products...`);
+            await Promise.all(
+                productsToCheckStock.map(p =>
+                    // Call checkLowStock, catching individual errors so one failure doesn't stop others
+                    checkLowStock(p.id, p.newQuantity, p.name,)
+                        .catch(e => console.error(`Error during post-decrement low stock check for ${p.id}:`, e))
+                )
+            );
+            console.log("Firebase: Post-decrement low stock checks complete.");
+            // --- End Low Stock Check ---
 
-      } else {
+        } else {
 
 
-          console.log("Firebase: No products required decrementing in this run.");
-      }
-  } catch (error) {
-      console.error('Firebase: Error during batch decrement process: ', error);
-      // Note: If batch.commit() fails, none of the updates are applied.
-      // Consider adding retry logic or more granular error handling if needed.
-  }
+            console.log("Firebase: No products required decrementing in this run.");
+        }
+    } catch (error) {
+        console.error('Firebase: Error during batch decrement process: ', error);
+        // Note: If batch.commit() fails, none of the updates are applied.
+        // Consider adding retry logic or more granular error handling if needed.
+    }
 };
 
 
