@@ -15,6 +15,8 @@ import {
   deleteDoc, // For deleting documents
   type Firestore, // Firestore type definition
 } from 'firebase/firestore';
+import * as Notifications from 'expo-notifications';
+
 import { getApps, type FirebaseApp } from 'firebase/app'; // For checking Firebase initialization
 //import { updateLocalProductQuantity } from '@/lib/local-storage'; // Function to update local quantity
 
@@ -23,14 +25,14 @@ import { getApps, type FirebaseApp } from 'firebase/app'; // For checking Fireba
 // Product structure specifically for Firestore (uses Timestamps)
 export interface Product {
   id: string; // Document ID in Firestore (should match local ID)
-  name: string;
+  name?: string;
   quantity: number;
   consumptionRate?: {
     amount: number;
     period: number;
     unit: 'hour' | 'day' | 'week' | 'month';
   };
-  minStockLevel: number;
+  minStockLevel?: number;
   lastUpdated: Timestamp; // Firestore Timestamp
   lastDecremented?: Timestamp | null; // Firestore Timestamp or null
 }
@@ -199,6 +201,77 @@ export const removeProduct = async (productId: string): Promise<void> => {
     }
   };
 
+
+export const updateProductQuantity = async (
+    productId: string,
+    quantityToAdd: number
+): Promise<{ id: string, newQuantity: number }> => {
+    // Obtenir l'instance Firebase Firestore
+    const db = getDb();
+    if (!db) {
+        return Promise.reject(new Error("Firebase Firestore n'est pas disponible ou mal configuré."));
+    }
+
+    const productRef = doc(db, 'products', productId);
+
+    try {
+        // 1. Récupérer le document actuel du produit
+        const productSnap = await getDoc(productRef);
+
+        if (!productSnap.exists()) {
+            return Promise.reject(
+                new Error(`Le produit avec l'ID "${productId}" n'existe pas.`)
+            );
+        }
+
+        // 2. Extraire les données du produit existant
+        const productData = productSnap.data();
+        console.log(productData)
+        const currentQuantity = productData.quantity || 0;
+
+        // 3. Calculer la nouvelle quantité (avec minimum à 0)
+        const newQuantity = Math.max(0, currentQuantity + quantityToAdd);
+
+        // 4. Préparer les données de mise à jour
+        const now = new Date();
+
+
+        const updateData = {
+
+            quantity: newQuantity,
+            lastUpdated: Timestamp.fromDate(now)
+        };
+
+
+
+
+        // 5. Mettre à jour le document dans Firestore avec merge:true
+        await setDoc(productRef, updateData, { merge: true });
+
+
+
+        console.log(`Firebase: Quantité du produit ${productId} mise à jour: ${currentQuantity} -> ${newQuantity}`);
+
+        // 6. Vérifier si cette mise à jour déclenche une alerte de stock bas
+        const { name, minStockLevel } = productData;
+        try {
+            // Importer et appeler checkLowStock de manière dynamique
+            const { checkLowStock } = await import('./firestore');
+            await checkLowStock(productId, newQuantity, name, minStockLevel);
+        } catch (lowStockError) {
+            console.error(`Erreur lors de la vérification du stock bas: ${lowStockError}`);
+            // Ne pas faire échouer la mise à jour principale si cette vérification échoue
+        }
+
+        // 7. Retourner l'ID du produit et sa nouvelle quantité
+        return { id: productId, newQuantity };
+
+    } catch (error) {
+        console.error(`Erreur lors de la mise à jour de la quantité pour le produit ${productId}:`, error);
+        throw error; // Propager l'erreur pour être gérée par l'appelant
+    }
+};
+
 // --- Automatic Decrement Logic (Firestore version) ---
 
 /**
@@ -230,7 +303,7 @@ export const decrementQuantities = async (): Promise<void> => {
   const nowTimestamp = Timestamp.fromDate(now); // Current time as Firestore Timestamp
   let updatesMade = 0; // Count how many products were actually updated
   // Store products whose stock changed to check notifications later
-  const productsToCheckStock: { id: string, name: string, newQuantity: number }[] = [];
+  const productsToCheckStock: { id: string, name: string | undefined, newQuantity: number }[] = [];
 
 
   console.log(`Firebase: Running decrement check at ${now.toISOString()}...`);
@@ -241,13 +314,17 @@ export const decrementQuantities = async (): Promise<void> => {
       console.log(`Firebase: Found ${querySnapshot.docs.length} products with rate and quantity > 0 to check.`);
 
       querySnapshot.forEach((docSnap) => {
+
           const product = { id: docSnap.id, ...docSnap.data() } as Product;
+          console.log(`processing ddddddddddddddddddddddd ${product.lastDecremented}`)
           const rate = product.consumptionRate;
 
           // Get the last decremented date, default to distant past if invalid/missing
           let lastDecrementedDate = new Date(0); // Start with epoch
           if (product.lastDecremented instanceof Timestamp) {
               lastDecrementedDate = product.lastDecremented.toDate();
+              console.log(`time =${product.lastDecremented.toDate()}`)
+
           } else if (product.lastDecremented === null) {
                // If explicitly null, treat as never decremented before for calculation
                lastDecrementedDate = new Date(0);
@@ -267,11 +344,15 @@ export const decrementQuantities = async (): Promise<void> => {
 
           // Calculate time difference and periods passed
           const diffTime = now.getTime() - lastDecrementedDate.getTime();
+          console.log(now.getTime())
+          console.log(`${diffTime}`)
           if (diffTime <= 0) {
               return product; // No time passed or potential clock skew
           }
 
           const diffhours = diffTime / (1000 * 60 * 60);
+
+          console.log(`${diffhours}`)
           let periodsPassed = 0;
 
           if (rate.unit === 'hour') {
@@ -288,6 +369,8 @@ export const decrementQuantities = async (): Promise<void> => {
 
           if (periodsPassed > 0) {
               const quantityToDecrement = periodsPassed * rate.amount;
+              console.log(`${periodsPassed}`)
+              console.log(`${rate.amount}`)
               // Calculate new quantity, ensuring it doesn't go below zero
               const newQuantity = Math.max(0, product.quantity - quantityToDecrement);
 
@@ -368,6 +451,31 @@ export const decrementQuantities = async (): Promise<void> => {
  * @param productName Optional: The product name (avoids an extra Firestore read if known).
  * @returns Promise resolving when the check is complete.
  */
+
+
+export const sendImmediateNotification = async (token: string, productName: string, quantity: number) => {
+    const message = {
+        to: token,
+        sound: 'default',
+        title: 'Stock bas',
+        body: `${productName} est presque épuisé ! Quantité restante: ${quantity}`,
+    };
+
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+    });
+
+    const result = await response.json();
+    console.log('✅ Notification envoyée :', result);
+};
+
+
+
 export const checkLowStock = async (productId: string, currentQuantity?: number, productName?: string, productMinStockLevel?: number ): Promise<void> => {
     const db = getDb();
     if (!db) {
@@ -381,8 +489,8 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
 
     try {
         let quantity: number;
-        let name: string;
-        let minStockLevel: number;
+        let name: string | undefined;
+        let minStockLevel: number | undefined;
 
         // Fetch product data from Firestore if quantity or name wasn't provided
         if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined) {
@@ -419,6 +527,12 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
             if (!isAcknowledged) {
                  console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
                  // Prepare notification data
+
+                const token = (await Notifications.getExpoPushTokenAsync()).data;
+
+                // Appeler la fonction d'envoi de notification
+                await sendImmediateNotification(token, name!, quantity);
+
                  const notificationData: Omit<Notification, 'id'> = {
                     productId: productId,
                     productName: name,

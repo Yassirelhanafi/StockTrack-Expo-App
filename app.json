@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "StockTrack",
-    "slug": "stocktrack-expo",
+    "slug": "stocktrack-expo-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./src/assets/images/stockwatch_white.png",
@@ -24,13 +24,15 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.yourcompany.stocktrack",
-       "permissions": [
-        "android.permission.CAMERA"
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
       ]
     },
     "web": {
       "favicon": "./src/assets/images/stockwatch_white.png",
-       "bundler": "metro"
+      "bundler": "metro"
     },
     "plugins": [
       "expo-router"
@@ -44,7 +46,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID_HERE"
+        "projectId": "cdf3927f-da9c-40e9-8902-43446048da67"
       },
       "firebaseApiKey": "AIzaSyBvMZSiXMhbBSYWzMV0VUA4qhoeu0UCNVU",
       "firebaseAuthDomain": "stocktrack-expo-app.firebaseapp.com",
@@ -52,6 +54,7 @@
       "firebaseStorageBucket": "stocktrack-expo-app.firebasestorage.app",
       "firebaseMessagingSenderId": "1081577006078",
       "firebaseAppId": "1:1081577006078:web:0c7da72ddb4e26f08196af"
-    }
+    },
+    "owner": "yassirelhanafi"
   }
 }
