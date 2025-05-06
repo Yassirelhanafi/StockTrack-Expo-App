@@ -23,7 +23,11 @@
         "android.permission.CAMERA",
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE"
-      ]
+      ],
+      "notification": {
+        "icon": "./src/assets/images/stockwatch_white.png",
+        "color": "#ffffff"
+      }
     },
     "web": {
       "favicon": "./src/assets/images/stockwatch_white.png",
