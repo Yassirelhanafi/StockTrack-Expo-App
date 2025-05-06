@@ -15,7 +15,6 @@ import {
   deleteDoc, // For deleting documents
   type Firestore, // Firestore type definition
 } from 'firebase/firestore';
-import * as Notifications from 'expo-notifications';
 
 import { getApps, type FirebaseApp } from 'firebase/app'; // For checking Firebase initialization
 //import { updateLocalProductQuantity } from '@/lib/local-storage'; // Function to update local quantity
@@ -430,6 +429,8 @@ export const decrementQuantities = async (): Promise<void> => {
           // --- End Low Stock Check ---
 
       } else {
+
+
           console.log("Firebase: No products required decrementing in this run.");
       }
   } catch (error) {
@@ -453,26 +454,6 @@ export const decrementQuantities = async (): Promise<void> => {
  */
 
 
-export const sendImmediateNotification = async (token: string, productName: string, quantity: number) => {
-    const message = {
-        to: token,
-        sound: 'default',
-        title: 'Stock bas',
-        body: `${productName} est presque épuisé ! Quantité restante: ${quantity}`,
-    };
-
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(message),
-    });
-
-    const result = await response.json();
-    console.log('✅ Notification envoyée :', result);
-};
 
 
 
@@ -528,10 +509,6 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
                  console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
                  // Prepare notification data
 
-                const token = (await Notifications.getExpoPushTokenAsync()).data;
-
-                // Appeler la fonction d'envoi de notification
-                await sendImmediateNotification(token, name!, quantity);
 
                  const notificationData: Omit<Notification, 'id'> = {
                     productId: productId,

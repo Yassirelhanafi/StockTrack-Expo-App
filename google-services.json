@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1081577006078",
+    "project_id": "stocktrack-expo-app",
+    "storage_bucket": "stocktrack-expo-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1081577006078:android:d35e625139a256e58196af",
+        "android_client_info": {
+          "package_name": "com.yourcompany.stocktrack"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB2XVB_FV3q_imYBBd0I5X81YaS5S7pdiU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

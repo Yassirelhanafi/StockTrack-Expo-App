@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./src/assets/images/stockwatch_white.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.yourcompany.stocktrack",
@@ -48,12 +43,12 @@
       "eas": {
         "projectId": "cdf3927f-da9c-40e9-8902-43446048da67"
       },
-      "firebaseApiKey": "AIzaSyBvMZSiXMhbBSYWzMV0VUA4qhoeu0UCNVU",
-      "firebaseAuthDomain": "stocktrack-expo-app.firebaseapp.com",
-      "firebaseProjectId": "stocktrack-expo-app",
-      "firebaseStorageBucket": "stocktrack-expo-app.firebasestorage.app",
-      "firebaseMessagingSenderId": "1081577006078",
-      "firebaseAppId": "1:1081577006078:web:0c7da72ddb4e26f08196af"
+      "firebaseApiKey": "AIzaSyDiK1Jxh3hCyaAADOkwELbUbH7EttnfHpk",
+      "firebaseAuthDomain": "stockwatch-34392.firebaseapp.com",
+      "firebaseProjectId": "stockwatch-34392",
+      "firebaseStorageBucket": "stockwatch-34392.firebasestorage.app",
+      "firebaseMessagingSenderId": "656657068489",
+      "firebaseAppId": "1:656657068489:web:46b42fb4144d7cb2413818"
     },
     "owner": "yassirelhanafi"
   }
