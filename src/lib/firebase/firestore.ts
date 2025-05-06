@@ -15,6 +15,7 @@ import {
   deleteDoc, // For deleting documents
   type Firestore, // Firestore type definition
 } from 'firebase/firestore';
+import * as Notifications from 'expo-notifications';
 
 import { getApps, type FirebaseApp } from 'firebase/app'; // For checking Firebase initialization
 //import { updateLocalProductQuantity } from '@/lib/local-storage'; // Function to update local quantity
@@ -504,6 +505,15 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
 
         // Case 1: Stock is LOW
         if (quantity < minStockLevel) {
+
+            Notifications.scheduleNotificationAsync({
+                content: {
+                    title: 'Low Stock Alert!',
+                    body: `${productId} (${name}) is running low on stock. Current stock: ${quantity}`,
+                    sound: 'default', // Or a custom sound
+                },
+                trigger: null, // Trigger immediately
+            });
             // Only create/update the notification if it's NOT already acknowledged
             if (!isAcknowledged) {
                  console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
