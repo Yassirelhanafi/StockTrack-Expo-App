@@ -1,19 +1,19 @@
 import {
-  getFirestore,
-  collection,
-  getDocs,
-  updateDoc,
-  doc,
-  query,
-  where,
-  serverTimestamp, // Use server timestamp for reliability
-  Timestamp, // Firestore Timestamp type
-  writeBatch, // For efficient multiple updates/deletes
-  getDoc, // For fetching single documents
-  setDoc, // For adding/overwriting documents
-  orderBy, // For sorting query results
-  deleteDoc, // For deleting documents
-  type Firestore, // Firestore type definition
+    getFirestore,
+    collection,
+    getDocs,
+    updateDoc,
+    doc,
+    query,
+    where,
+    serverTimestamp, // Use server timestamp for reliability
+    Timestamp, // Firestore Timestamp type
+    writeBatch, // For efficient multiple updates/deletes
+    getDoc, // For fetching single documents
+    setDoc, // For adding/overwriting documents
+    orderBy, // For sorting query results
+    deleteDoc, // For deleting documents
+    type Firestore, // Firestore type definition
 } from 'firebase/firestore';
 import * as Notifications from 'expo-notifications';
 
@@ -24,17 +24,18 @@ import { getApps, type FirebaseApp } from 'firebase/app'; // For checking Fireba
 
 // Product structure specifically for Firestore (uses Timestamps)
 export interface Product {
-  id: string; // Document ID in Firestore (should match local ID)
-  name?: string;
-  quantity: number;
-  consumptionRate?: {
-    amount: number;
-    period: number;
-    unit: 'hour' | 'day' | 'week' | 'month';
-  };
-  minStockLevel?: number;
-  lastUpdated: Timestamp; // Firestore Timestamp
-  lastDecremented?: Timestamp | null; // Firestore Timestamp or null
+    id: string; // Document ID in Firestore (should match local ID)
+    name?: string;
+    quantity: number;
+    consumptionRate?: {
+        amount: number;
+        period: number;
+        unit: 'hour' | 'day' | 'week' | 'month';
+    };
+    minStockLevel?: number;
+    reorderQuantity?: number;
+    lastUpdated: Timestamp; // Firestore Timestamp
+    lastDecremented?: Timestamp | null; // Firestore Timestamp or null
 }
 
 // Notification structure for Firestore
@@ -64,37 +65,37 @@ let firestoreDbInstance: Firestore | null = null;
  * Not exported directly.
  */
 const getDb = (): Firestore | null => {
-  // 1. Return cached instance if available
-  if (firestoreDbInstance) {
-      return firestoreDbInstance;
-  }
+    // 1. Return cached instance if available
+    if (firestoreDbInstance) {
+        return firestoreDbInstance;
+    }
 
-  // 2. Check if Firebase app has been initialized (usually by FirebaseProvider)
-  if (!getApps().length) {
-     console.warn('Firebase has not been initialized. Firestore functions unavailable.');
-     return null; // Not initialized
-  }
+    // 2. Check if Firebase app has been initialized (usually by FirebaseProvider)
+    if (!getApps().length) {
+        console.warn('Firebase has not been initialized. Firestore functions unavailable.');
+        return null; // Not initialized
+    }
 
-  // 3. Get the initialized Firebase app instance
-  firebaseAppInstance = getApps()[0];
+    // 3. Get the initialized Firebase app instance
+    firebaseAppInstance = getApps()[0];
 
-  // 4. Basic check for essential config (projectId) on the app instance
-  //    This helps catch issues if initialization happened but config was bad.
-  if (!firebaseAppInstance?.options?.projectId) {
-      console.warn('Firebase App exists, but Project ID is missing in config. Firestore unavailable.');
-      return null; // Configuration seems incomplete
-  }
+    // 4. Basic check for essential config (projectId) on the app instance
+    //    This helps catch issues if initialization happened but config was bad.
+    if (!firebaseAppInstance?.options?.projectId) {
+        console.warn('Firebase App exists, but Project ID is missing in config. Firestore unavailable.');
+        return null; // Configuration seems incomplete
+    }
 
-  // 5. Try to get the Firestore instance and cache it
-  try {
-      firestoreDbInstance = getFirestore(firebaseAppInstance);
-      console.log("Firestore instance obtained successfully.");
-      return firestoreDbInstance;
-  } catch (error) {
-       console.error("Error getting Firestore instance:", error);
-       firestoreDbInstance = null; // Ensure cache is cleared on error
-       return null; // Failed to get instance
-  }
+    // 5. Try to get the Firestore instance and cache it
+    try {
+        firestoreDbInstance = getFirestore(firebaseAppInstance);
+        console.log("Firestore instance obtained successfully.");
+        return firestoreDbInstance;
+    } catch (error) {
+        console.error("Error getting Firestore instance:", error);
+        firestoreDbInstance = null; // Ensure cache is cleared on error
+        return null; // Failed to get instance
+    }
 };
 
 
@@ -111,35 +112,35 @@ const getDb = (): Firestore | null => {
 export const addProduct = async (
     productData: Omit<Product, 'lastUpdated' | 'lastDecremented'> & { lastUpdated: Date, lastDecremented?: Date }
 ): Promise<string> => {
-  const db = getDb();
-  if (!db) {
-      // If DB not available, reject the promise clearly
-      return Promise.reject(new Error("Firebase Firestore is not available or configured correctly."));
-  }
+    const db = getDb();
+    if (!db) {
+        // If DB not available, reject the promise clearly
+        return Promise.reject(new Error("Firebase Firestore is not available or configured correctly."));
+    }
 
-  const productRef = doc(db, 'products', productData.id); // Reference document using product ID
+    const productRef = doc(db, 'products', productData.id); // Reference document using product ID
 
-  try {
-    // Prepare data for Firestore, converting Dates to Timestamps
-    const dataToSave = {
-        ...productData,
-        // Convert Date objects to Firestore Timestamps
-        lastUpdated: Timestamp.fromDate(productData.lastUpdated),
-        // Handle optional lastDecremented date, ensuring it's null if undefined/null
-        lastDecremented: productData.lastDecremented ? Timestamp.fromDate(productData.lastDecremented) : null
-    };
+    try {
+        // Prepare data for Firestore, converting Dates to Timestamps
+        const dataToSave = {
+            ...productData,
+            // Convert Date objects to Firestore Timestamps
+            lastUpdated: Timestamp.fromDate(productData.lastUpdated),
+            // Handle optional lastDecremented date, ensuring it's null if undefined/null
+            lastDecremented: productData.lastDecremented ? Timestamp.fromDate(productData.lastDecremented) : null
+        };
 
-    // Use setDoc with merge:true to create if not exists, or update if exists
-    await setDoc(productRef, dataToSave, { merge: true });
+        // Use setDoc with merge:true to create if not exists, or update if exists
+        await setDoc(productRef, dataToSave, { merge: true });
 
-    console.log(`Firebase: Product ${productData.id} added/updated successfully.`);
-    // After successful save/update, check if it triggers a low stock notification
-    await checkLowStock(productData.id, productData.quantity, productData.name);
-    return productData.id; // Return the ID on success
-  } catch (error) {
-    console.error(`Firebase: Error adding/updating product ${productData.id}: `, error);
-    throw error; // Re-throw the error to be handled by the caller (e.g., React Query mutation)
-  }
+        console.log(`Firebase: Product ${productData.id} added/updated successfully.`);
+        // After successful save/update, check if it triggers a low stock notification
+        await checkLowStock(productData.id, productData.quantity, productData.name);
+        return productData.id; // Return the ID on success
+    } catch (error) {
+        console.error(`Firebase: Error adding/updating product ${productData.id}: `, error);
+        throw error; // Re-throw the error to be handled by the caller (e.g., React Query mutation)
+    }
 };
 
 
@@ -176,30 +177,30 @@ export const getProducts = async (): Promise<Product[]> => {
 
 export const removeProduct = async (productId: string): Promise<void> => {
     const db = getDb();
-    
+
     if (!db) {
-      return Promise.reject(new Error("Firebase Firestore is not available or configured correctly."));
+        return Promise.reject(new Error("Firebase Firestore is not available or configured correctly."));
     }
-  
+
     try {
-      // Step 2: Delete from Firestore (Firebase)
-      const productRef = doc(db, 'products', productId);
-      await deleteDoc(productRef);
-      console.log(`Product ${productId} deleted from Firebase.`);
-  
-      // OPTIONAL: Delete related notifications from Firebase Firestore
-      const notificationsRef = collection(db, 'notifications');
-      const q = query(notificationsRef, where('productId', '==', productId));
-      const snapshot = await getDocs(q);
-      const deletions = snapshot.docs.map(docSnap => deleteDoc(doc(db, 'notifications', docSnap.id)));
-      await Promise.all(deletions);
-      console.log(`Related notifications for product ${productId} deleted from Firebase.`);
-  
+        // Step 2: Delete from Firestore (Firebase)
+        const productRef = doc(db, 'products', productId);
+        await deleteDoc(productRef);
+        console.log(`Product ${productId} deleted from Firebase.`);
+
+        // OPTIONAL: Delete related notifications from Firebase Firestore
+        const notificationsRef = collection(db, 'notifications');
+        const q = query(notificationsRef, where('productId', '==', productId));
+        const snapshot = await getDocs(q);
+        const deletions = snapshot.docs.map(docSnap => deleteDoc(doc(db, 'notifications', docSnap.id)));
+        await Promise.all(deletions);
+        console.log(`Related notifications for product ${productId} deleted from Firebase.`);
+
     } catch (error) {
-      console.error(`Error removing product ${productId}: `, error);
-      throw new Error(`Failed to remove product ${productId}: ${error.message}`);
+        console.error(`Error removing product ${productId}: `, error);
+        throw new Error(`Failed to remove product ${productId}: ${error.message}`);
     }
-  };
+};
 
 
 export const updateProductQuantity = async (
@@ -290,16 +291,6 @@ export const decrementQuantities = async (): Promise<void> => {
         return; // Exit if DB not available
     }
 
-    // Vérification de l'heure actuelle pour éviter les décrements entre 22h00 et 8h00
-    const now = new Date();
-    const currentHour = now.getHours();
-
-    // Si l'heure actuelle est entre 22h00 et 8h00, on ne fait pas de décrement
-    if (currentHour >= 21 || currentHour < 7) {
-        console.log(`Firebase: Skipping decrement check at ${now.toISOString()} - outside of active hours (21:00-07:00).`);
-        return;
-    }
-
     const productsRef = collection(db, 'products');
     // Query for products that have a consumptionRate defined and have quantity > 0
     const q = query(productsRef,
@@ -309,6 +300,7 @@ export const decrementQuantities = async (): Promise<void> => {
 
 
     const batch = writeBatch(db); // Use a batch for efficient updates
+    const now = new Date();
     const nowTimestamp = Timestamp.fromDate(now); // Current time as Firestore Timestamp
     let updatesMade = 0; // Count how many products were actually updated
     // Store products whose stock changed to check notifications later
@@ -359,7 +351,7 @@ export const decrementQuantities = async (): Promise<void> => {
                 return product; // No time passed or potential clock skew
             }
 
-            const diffhours = diffTime / (1000 * 15);
+            const diffhours = diffTime / (1000 * 60 * 60);
 
             console.log(`${diffhours}`)
             let periodsPassed = 0;
@@ -464,6 +456,26 @@ export const decrementQuantities = async (): Promise<void> => {
  */
 
 
+export const sendImmediateNotification = async (token: string, productName: string, quantity: number) => {
+    const message = {
+        to: token,
+        sound: 'default',
+        title: 'Stock bas',
+        body: `${productName} est presque épuisé ! Quantité restante: ${quantity}`,
+    };
+
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message),
+    });
+
+    const result = await response.json();
+    console.log('✅ Notification envoyée :', result);
+};
 
 
 
@@ -478,13 +490,17 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
     // Use the product ID as the document ID in the 'notifications' collection for easy lookup
     const notificationRef = doc(db, 'notifications', productId);
 
+    const batch = writeBatch(db); // Use a batch for efficient updates
+
+
     try {
         let quantity: number;
         let name: string | undefined;
         let minStockLevel: number | undefined;
+        let reorderQuantity: number | undefined;
 
         // Fetch product data from Firestore if quantity or name wasn't provided
-        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined) {
+        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined || reorderQuantity === undefined) {
             console.log(`Fetching product data for ${productId} to check stock...`);
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
@@ -498,6 +514,7 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
             quantity = productData.quantity;
             name = productData.name;
             minStockLevel = productData.minStockLevel;
+            reorderQuantity = productData.reorderQuantity;
         } else {
             // Use provided quantity and name
             quantity = currentQuantity;
@@ -512,47 +529,49 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
 
         // --- Logic: Create/Update or Delete Notification ---
 
+        const newQte = quantity + reorderQuantity;
+
         // Case 1: Stock is LOW
         if (quantity < minStockLevel) {
-
-            Notifications.scheduleNotificationAsync({
-                content: {
-                    title: 'Low Stock Alert!',
-                    body: `${productId} (${name}) is running low on stock. Current stock: ${quantity}`,
-                    sound: 'default', // Or a custom sound
-                },
-                trigger: null, // Trigger immediately
-            });
             // Only create/update the notification if it's NOT already acknowledged
             if (!isAcknowledged) {
-                 console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
-                 // Prepare notification data
+                console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
+                // Prepare notification data
 
+                // Add update operation to the batch
+                await updateDoc(productRef, {
+                    quantity: newQte,
+                    lastUpdated: serverTimestamp()});
 
-                 const notificationData: Omit<Notification, 'id'> = {
+                const token = (await Notifications.getExpoPushTokenAsync()).data;
+
+                // Appeler la fonction d'envoi de notification
+                await sendImmediateNotification(token, name!, quantity);
+
+                const notificationData: Omit<Notification, 'id'> = {
                     productId: productId,
                     productName: name,
                     quantity: quantity,
                     timestamp: serverTimestamp(), // Use server time for consistency
                     acknowledged: false // Ensure new/updated alerts are active
                 };
-                 // Use setDoc with merge:true - creates if not exists, updates if exists.
-                 // Importantly, merge:true prevents overwriting `acknowledged` if it was somehow true before.
-                 // Setting acknowledged:false explicitly ensures it's active.
+                // Use setDoc with merge:true - creates if not exists, updates if exists.
+                // Importantly, merge:true prevents overwriting `acknowledged` if it was somehow true before.
+                // Setting acknowledged:false explicitly ensures it's active.
                 await setDoc(notificationRef, notificationData, { merge: true });
             } else {
-                 // Stock is low, but user already acknowledged a previous alert for this product. Do nothing.
-                 console.log(`Firebase: Low stock for "${name}" (${productId}) but notification already acknowledged. Ignoring.`);
+                // Stock is low, but user already acknowledged a previous alert for this product. Do nothing.
+                console.log(`Firebase: Low stock for "${name}" (${productId}) but notification already acknowledged. Ignoring.`);
             }
         }
         // Case 2: Stock is OK
         else {
-             // If stock is NOT low, delete the corresponding notification *only if it exists*.
+            // If stock is NOT low, delete the corresponding notification *only if it exists*.
             if (notificationSnap.exists()) {
                 console.log(`Firebase: Stock level OK for "${name}" (${productId}). Deleting existing notification.`);
                 await deleteDoc(notificationRef);
             }
-             // If stock is OK and no notification exists, do nothing.
+            // If stock is OK and no notification exists, do nothing.
         }
     } catch (error) {
         console.error(`Firebase: Error during low stock check for product ${productId}:`, error);
@@ -568,35 +587,35 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
  *          or empty array if DB unavailable, or rejecting on Firestore error.
  */
 export const getLowStockNotifications = async (): Promise<Notification[]> => {
-  const db = getDb();
-  if (!db) {
-      console.warn("Firebase Firestore not available, returning empty notifications list.");
-      // Resolve with empty array if DB is unavailable
-      return Promise.resolve([]);
-  }
+    const db = getDb();
+    if (!db) {
+        console.warn("Firebase Firestore not available, returning empty notifications list.");
+        // Resolve with empty array if DB is unavailable
+        return Promise.resolve([]);
+    }
 
-  const notificationsCol = collection(db, 'notifications');
-  // Query for active notifications: where acknowledged is false, order by timestamp desc
-  const q = query(
-      notificationsCol,
-      where('acknowledged', '==', false),
-      orderBy('timestamp', 'desc')
-  );
+    const notificationsCol = collection(db, 'notifications');
+    // Query for active notifications: where acknowledged is false, order by timestamp desc
+    const q = query(
+        notificationsCol,
+        where('acknowledged', '==', false),
+        orderBy('timestamp', 'desc')
+    );
 
-  try {
-      const notificationSnapshot = await getDocs(q);
-      // Map documents to Notification objects
-      const notificationList = notificationSnapshot.docs.map((doc) => ({
-        id: doc.id, // Use Firestore document ID
-        ...(doc.data() as Omit<Notification, 'id'>), // Spread data, ensure type
-        // acknowledged: false, // Explicitly set based on query, though data should match
-      }));
-      console.log(`Firebase: Fetched ${notificationList.length} active low stock notifications.`);
-      return notificationList;
-  } catch (error) {
-      console.error("Firebase: Error fetching notifications:", error);
-      throw error; // Re-throw Firestore errors for React Query to handle
-  }
+    try {
+        const notificationSnapshot = await getDocs(q);
+        // Map documents to Notification objects
+        const notificationList = notificationSnapshot.docs.map((doc) => ({
+            id: doc.id, // Use Firestore document ID
+            ...(doc.data() as Omit<Notification, 'id'>), // Spread data, ensure type
+            // acknowledged: false, // Explicitly set based on query, though data should match
+        }));
+        console.log(`Firebase: Fetched ${notificationList.length} active low stock notifications.`);
+        return notificationList;
+    } catch (error) {
+        console.error("Firebase: Error fetching notifications:", error);
+        throw error; // Re-throw Firestore errors for React Query to handle
+    }
 };
 
 

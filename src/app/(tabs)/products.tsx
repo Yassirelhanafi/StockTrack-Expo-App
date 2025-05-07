@@ -16,13 +16,13 @@ export default function ProductsScreen() {
     const { data: products, isLoading, error, refetch, isRefetching, status } = useQuery<Product[]>({
         queryKey: ['Products'], // Unique key for firebase product data
         queryFn: getProducts, // Function to fetch data
-        staleTime: 30 * 1000, // Data considered fresh for 30 seconds
-        refetchInterval: 60 * 1000, // Automatically refetch every 60 seconds
+        staleTime: 8 * 1000, // Data considered fresh for 30 seconds
+        refetchInterval: 10 * 1000, // Automatically refetch every 60 seconds
         enabled: isFirebaseAvailable, // *Only* run this query if Firebase is available
     });
 
-     // --- React Query Mutation to delete a product from firebase ---
-     const deleteMutation = useMutation({
+    // --- React Query Mutation to delete a product from firebase ---
+    const deleteMutation = useMutation({
         mutationFn: removeProduct, // Function to remove the product from Firebase
         onSuccess: (data, productId) => {
             // Show success feedback
@@ -32,7 +32,7 @@ export default function ProductsScreen() {
                 text2: `Product "${productId}" removed from Firebase.`,
                 position: 'bottom',
             });
-    
+
             // Invalidate Firebase product and notifications queries to refresh the UI
             if (isFirebaseAvailable) {
                 queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -58,7 +58,7 @@ export default function ProductsScreen() {
     const handleDelete = (id: string, name: string) => {
         Alert.alert(
             "Confirm Deletion\n", // Alert Title
-             // Alert Message - clarify it's a local delete only
+            // Alert Message - clarify it's a local delete only
             `Remove "${name}" (ID: ${id}) ?\nThis action will not be rolled back`,
             [
                 // Buttons
@@ -108,17 +108,20 @@ export default function ProductsScreen() {
                     Minimum Stock Level : {item.minStockLevel}
                 </Text>
                 <Text style={styles.itemDetailSmall}>
+                    Reorder Quantity : {item.reorderQuantity}
+                </Text>
+                <Text style={styles.itemDetailSmall}>
                     Updated: {formatTimestamp(item.lastUpdated)}
                 </Text>
-                 {item.lastDecremented && (
+                {item.lastDecremented && (
                     <Text style={styles.itemDetailSmall}>
                         Decrement Checked: {formatTimestamp(item.lastDecremented)}
                     </Text>
-                 )}
+                )}
             </View>
 
             {/* Right side: Quantity Badge and Delete Button */}
-             <View style={styles.actionsContainer}>
+            <View style={styles.actionsContainer}>
                 {/* Quantity Badge - styled differently based on stock level */}
                 <View style={[
                     styles.quantityBadge,
@@ -132,21 +135,21 @@ export default function ProductsScreen() {
                         {item.quantity}
                     </Text>
                 </View>
-                 {/* Delete Button */}
-                 <TouchableOpacity
+                {/* Delete Button */}
+                <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={() => handleDelete(item.id, item.name)}
                     // Disable button if delete mutation is pending for *this specific item*
                     disabled={deleteMutation.isPending && deleteMutation.variables === item.id}
                 >
-                     {/* Show activity indicator or trash icon */}
-                     {(deleteMutation.isPending && deleteMutation.variables === item.id) ? (
+                    {/* Show activity indicator or trash icon */}
+                    {(deleteMutation.isPending && deleteMutation.variables === item.id) ? (
                         <ActivityIndicator size="small" color="#ef4444" /> // Red spinner
-                     ) : (
+                    ) : (
                         <Ionicons name="trash-bin-outline" size={22} color="#ef4444" /> // Red trash icon
-                     )}
-                 </TouchableOpacity>
-             </View>
+                    )}
+                </TouchableOpacity>
+            </View>
         </View>
     );
 
@@ -169,13 +172,13 @@ export default function ProductsScreen() {
             <View style={styles.centered}>
                 <Ionicons name="alert-circle-outline" size={40} color="#b91c1c" style={styles.errorIcon}/>
                 <Text style={styles.errorText}>Error Loading Local Products</Text>
-                 {/* Display error message */}
+                {/* Display error message */}
                 <Text style={styles.errorDetails}>{(error as Error).message || 'An unknown error occurred.'}</Text>
-                 {/* Retry Button */}
+                {/* Retry Button */}
                 <TouchableOpacity style={[styles.button, styles.retryButton]} onPress={() => refetch()}>
-                     <Ionicons name="refresh-outline" size={18} color="#fff" />
-                     <Text style={styles.buttonText}>Try Again</Text>
-                 </TouchableOpacity>
+                    <Ionicons name="refresh-outline" size={18} color="#fff" />
+                    <Text style={styles.buttonText}>Try Again</Text>
+                </TouchableOpacity>
             </View>
         );
     }
@@ -201,7 +204,7 @@ export default function ProductsScreen() {
             </ScrollView>
         );
     }
-    
+
 
     // 4. Success State (Products found, display list)
     return (
@@ -241,7 +244,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 20,
         backgroundColor: '#f0f2f5',
-     },
+    },
     list: { // Style for the FlatList container
         flex: 1,
         backgroundColor: '#f0f2f5',
@@ -287,7 +290,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#6b7280',
         marginTop: 2,
-         lineHeight: 16,
+        lineHeight: 16,
     },
     actionsContainer: { // Container for quantity badge and delete button on the right
         flexDirection: 'row', // Arrange badge and button horizontally
@@ -311,7 +314,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#B4EDCA', // Light green background
         borderColor: '#22C55E', // Gray border
     },
-     lowStockText: { // Text style within the low stock badge
+    lowStockText: { // Text style within the low stock badge
         fontWeight: 'bold',
         fontSize: 14,
         color: '#b91c1c', // Dark red text
@@ -319,11 +322,11 @@ const styles = StyleSheet.create({
     normalStockText: { // Text style within the normal stock badge
         fontWeight: 'bold',
         fontSize: 14,
-         color: '#22C55E', // Dark green text
-   },
+        color: '#22C55E', // Dark green text
+    },
     deleteButton: { // Style for the delete button (touchable area)
         padding: 8, // Increase touchable area around the icon
-         borderRadius: 20, // Circular background/hit area
+        borderRadius: 20, // Circular background/hit area
     },
     loadingText: { // Text shown during loading
         marginTop: 10,
@@ -331,7 +334,7 @@ const styles = StyleSheet.create({
         color: '#4b5563',
     },
     errorIcon: { // Icon used in error state
-         marginBottom: 15,
+        marginBottom: 15,
     },
     errorText: { // Main error message text
         color: '#b91c1c',
@@ -340,7 +343,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginBottom: 5,
     },
-     errorDetails: { // Secondary error details text
+    errorDetails: { // Secondary error details text
         color: '#dc2626',
         fontSize: 14,
         textAlign: 'center',
@@ -348,7 +351,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
     },
     emptyIcon: { // Icon used in empty state
-         marginBottom: 15,
+        marginBottom: 15,
     },
     emptyText: { // Main text for empty state
         fontSize: 18,
@@ -365,35 +368,35 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
     },
     emptySubTextSmall: { // Smaller sub-text (e.g., pull down to refresh)
-       fontSize: 12,
-       color: '#9ca3af',
-       textAlign: 'center',
-       marginTop: 5,
-   },
-     button: { // Base style for buttons like Retry
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 20,
-      borderRadius: 8,
-      shadowColor: "#000",
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.1,
-      shadowRadius: 2,
-      elevation: 2,
-      marginTop: 10,
-  },
-   primaryButton: { // Style not used on this screen currently, but defined for consistency
-      backgroundColor: '#006400',
-   },
-   retryButton: { // Style for the Try Again button in error state
+        fontSize: 12,
+        color: '#9ca3af',
+        textAlign: 'center',
+        marginTop: 5,
+    },
+    button: { // Base style for buttons like Retry
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 8,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+        marginTop: 10,
+    },
+    primaryButton: { // Style not used on this screen currently, but defined for consistency
+        backgroundColor: '#006400',
+    },
+    retryButton: { // Style for the Try Again button in error state
         backgroundColor: '#b91c1c', // Red
-   },
-   buttonText: { // Text inside buttons like Try Again
-       color: '#ffffff',
-       marginLeft: 8,
-       fontSize: 15,
-       fontWeight: '600',
-   },
+    },
+    buttonText: { // Text inside buttons like Try Again
+        color: '#ffffff',
+        marginLeft: 8,
+        fontSize: 15,
+        fontWeight: '600',
+    },
 });

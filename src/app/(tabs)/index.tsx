@@ -31,6 +31,7 @@ interface ProductData {
     quantity: number;
     consumptionRate?: ConsumptionRate;
     minStockLevel? : number;
+    reorderQuantity? : number
     // Timestamps (lastUpdated, lastDecremented) are added right before saving
 }
 
@@ -50,6 +51,8 @@ export default function ScanScreen() {
     const [manualQuantity, setManualQuantity] = useState('');
     const [manualMinStockLevel, setManualMinStockLevel] = useState('');
     const [manualRate, setManualRate] = useState('');
+    const [manualReorderQuantity, setManualReorderQuantity] = useState('');
+
 
     const queryClient = useQueryClient(); // React Query client for cache invalidation
     const { isFirebaseAvailable } = useFirebase(); // Get Firebase status from provider
@@ -87,6 +90,10 @@ export default function ScanScreen() {
 
                     if (product.minStockLevel !== undefined) {
                         firebaseData.minStockLevel = product.minStockLevel;
+                    }
+
+                    if (product.reorderQuantity !== undefined) {
+                        firebaseData.reorderQuantity = product.reorderQuantity;
                     }
 
                     // Only add consumptionRate if it exists (avoid undefined values in Firebase)
@@ -151,7 +158,7 @@ export default function ScanScreen() {
         },
         onSuccess: (data) => {
             // Récupérer des informations sur l'opération effectuée
-            const isSimpleUpdate = !data.name && data.minStockLevel === undefined && !data.consumptionRate;
+            const isSimpleUpdate = !data.name && data.minStockLevel === undefined && data.reorderQuantity === undefined && !data.consumptionRate;
             const operationText = isSimpleUpdate ? "mis à jour" : "ajouté/mis à jour";
             const productName = data.name || data.id;
 
@@ -270,6 +277,10 @@ export default function ScanScreen() {
                     product.minStockLevel = data.minStockLevel;
                 }
 
+                if (typeof data.reorderQuantity === 'number') {
+                    product.reorderQuantity = data.reorderQuantity;
+                }
+
                 // Parse consumption rate if present (can be string or object in JSON)
                 if (data.consumptionRate) {
                     if (typeof data.consumptionRate === 'string') {
@@ -335,6 +346,11 @@ export default function ScanScreen() {
                         const minStock = parseInt(value, 10);
                         if (!isNaN(minStock)) {
                             product.minStockLevel = minStock;
+                        }
+                    }else if (trimmedKey === 'reorderQuantity') {
+                        const reorderQte = parseInt(value, 10);
+                        if (!isNaN(reorderQte)) {
+                            product.reorderQuantity = reorderQte;
                         }
                     } else if (trimmedKey === 'rate' || trimmedKey === 'consumptionrate') {
                         const parsedRate = parseConsumptionRate(value);
@@ -414,6 +430,10 @@ export default function ScanScreen() {
             }
         }
 
+        if (product.reorderQuantity !== undefined) {
+            message += `\nReorder Quantity: ${product.reorderQuantity}`;
+        }
+
         if (product.consumptionRate) {
             message += `\nRythme: ${product.consumptionRate.amount} par `;
             if (product.consumptionRate.period && product.consumptionRate.period > 1) {
@@ -452,6 +472,7 @@ export default function ScanScreen() {
         setManualQuantity('');
         setManualMinStockLevel('');
         setManualRate('');
+        setManualReorderQuantity('');
         setErrorMessage(null); // Also clear any validation errors displayed
     };
 
@@ -529,6 +550,15 @@ export default function ScanScreen() {
             }
         }
 
+        let reorderQuantityNum: number | undefined = undefined;
+        if (manualReorderQuantity.trim()) {
+            reorderQuantityNum = parseInt(manualReorderQuantity, 10);
+            if (isNaN(reorderQuantityNum) || reorderQuantityNum < 0) {
+                Alert.alert("Validation Error", "Reorder quantity must be a valid non-negative number");
+                return;
+            }
+        }
+
         // Parse consumption rate if provided
         let consumptionRate: ProductData['consumptionRate'] | undefined = undefined;
         if (manualRate.trim()) {
@@ -553,6 +583,10 @@ export default function ScanScreen() {
 
         if (minStockLevelNum !== undefined) {
             productData.minStockLevel = minStockLevelNum;
+        }
+
+        if (reorderQuantityNum !== undefined) {
+            productData.reorderQuantity = reorderQuantityNum;
         }
 
         if (consumptionRate) {
@@ -690,6 +724,17 @@ export default function ScanScreen() {
                     placeholderTextColor="#aaa"
                     editable={!isProcessing}
                 />
+
+                <TextInput
+                    style={styles.input}
+                    placeholder="Reorder Quantity"
+                    value={manualReorderQuantity}
+                    onChangeText={setManualReorderQuantity}
+                    keyboardType="numeric" // Show numeric keyboard
+                    placeholderTextColor="#aaa"
+                    editable={!isProcessing}
+                />
+
                 <TextInput
                     style={styles.input}
                     placeholder="Consumption Rate (Optional)"
@@ -734,7 +779,7 @@ export default function ScanScreen() {
                 </Text>
                 <View style={styles.codeExample}>
                     <Text style={styles.codeText}>
-                        {`{\n  "id": "prod123",\n  "name": "Product Name",\n  "quantity": 10,\n  "minStockLevel": 3,\n  "consumptionRate": "2 per 3 day"\n}`}
+                        {`{\n  "id": "prod123",\n  "name": "Product Name",\n  "quantity": 10,\n  "minStockLevel": 3,\n  "reorderQuantity": 5,\n  "consumptionRate": "2 per 3 day"\n}`}
                     </Text>
                 </View>
                 <Text style={styles.qrInfoText}>
