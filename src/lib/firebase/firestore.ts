@@ -532,7 +532,7 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
         const newQte = quantity + reorderQuantity;
 
         // Case 1: Stock is LOW
-        if (quantity < minStockLevel) {
+        if (quantity <= minStockLevel) {
             // Only create/update the notification if it's NOT already acknowledged
             if (!isAcknowledged) {
                 console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
