@@ -45,7 +45,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "9eece66d-7649-422a-8eee-c109d69b9c5d"
+        "projectId": "c8b0659d-97e3-4696-961a-12c4af4b5e66"
       },
       "firebaseApiKey": "AIzaSyDiK1Jxh3hCyaAADOkwELbUbH7EttnfHpk",
       "firebaseAuthDomain": "stockwatch-34392.firebaseapp.com",
@@ -54,6 +54,6 @@
       "firebaseMessagingSenderId": "656657068489",
       "firebaseAppId": "1:656657068489:web:46b42fb4144d7cb2413818"
     },
-    "owner": "yassirhanafi"
+    "owner": "elhanafiyassir"
   }
 }

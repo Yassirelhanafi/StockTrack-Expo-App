@@ -134,8 +134,9 @@ export const addProduct = async (
         await setDoc(productRef, dataToSave, { merge: true });
 
         console.log(`Firebase: Product ${productData.id} added/updated successfully.`);
-        // After successful save/update, check if it triggers a low stock notification
         await checkLowStock(productData.id, productData.quantity, productData.name);
+
+
         return productData.id; // Return the ID on success
     } catch (error) {
         console.error(`Firebase: Error adding/updating product ${productData.id}: `, error);
@@ -417,13 +418,22 @@ export const decrementQuantities = async (): Promise<void> => {
             await batch.commit();
             console.log(`Firebase: Batch commit successful for ${updatesMade} product quantity updates.`);
 
+            await Promise.all(
+                productsToCheckStock.map(p =>
+
+                    checkLowStock(p.id, p.newQuantity, p.name,)
+                        .catch(e => console.error(`Error during post-decrement low stock check for ${p.id}:`, e))
+                )
+            );
+
+            await new Promise(resolve => setTimeout(resolve, 60000));
             // --- Check Low Stock for Affected Products ---
             // Run checkLowStock concurrently for all products whose quantity changed.
             console.log(`Firebase: Checking low stock status for ${productsToCheckStock.length} updated products...`);
             await Promise.all(
                 productsToCheckStock.map(p =>
-                    // Call checkLowStock, catching individual errors so one failure doesn't stop others
-                    checkLowStock(p.id, p.newQuantity, p.name,)
+
+                    AddStock(p.id, p.newQuantity, p.name,)
                         .catch(e => console.error(`Error during post-decrement low stock check for ${p.id}:`, e))
                 )
             );
@@ -538,10 +548,6 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
                 console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
                 // Prepare notification data
 
-                // Add update operation to the batch
-                await updateDoc(productRef, {
-                    quantity: newQte,
-                    lastUpdated: serverTimestamp()});
 
                 const token = (await Notifications.getExpoPushTokenAsync()).data;
 
@@ -579,6 +585,102 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
     }
 };
 
+
+
+export const AddStock = async (productId: string, currentQuantity?: number, productName?: string, productMinStockLevel?: number ): Promise<void> => {
+    const db = getDb();
+    if (!db) {
+        console.warn(`Firebase Firestore not available, skipping low stock check for ${productId}.`);
+        return; // Exit if DB not available
+    }
+
+    const productRef = doc(db, 'products', productId);
+    // Use the product ID as the document ID in the 'notifications' collection for easy lookup
+    const notificationRef = doc(db, 'notifications', productId);
+
+    const batch = writeBatch(db); // Use a batch for efficient updates
+
+
+    try {
+        let quantity: number;
+        let name: string | undefined;
+        let minStockLevel: number | undefined;
+        let reorderQuantity: number | undefined;
+
+        // Fetch product data from Firestore if quantity or name wasn't provided
+        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined || reorderQuantity === undefined) {
+            console.log(`Fetching product data for ${productId} to check stock...`);
+            const productSnap = await getDoc(productRef);
+            if (!productSnap.exists()) {
+                console.warn(`Firebase: Product ${productId} not found during low stock check. Removing potential stale notification.`);
+                // If the product itself doesn't exist, ensure any related notification is removed.
+                await deleteDoc(notificationRef).catch(() => {}); // Ignore error if notification didn't exist
+                return; // Exit check if product doesn't exist
+            }
+            // Assert data type based on Firestore structure (adjust if needed)
+            const productData = productSnap.data() as Omit<Product, 'id'>;
+            quantity = productData.quantity;
+            name = productData.name;
+            minStockLevel = productData.minStockLevel;
+            reorderQuantity = productData.reorderQuantity;
+        } else {
+            // Use provided quantity and name
+            quantity = currentQuantity;
+            name = productName;
+            minStockLevel = productMinStockLevel
+        }
+
+        // Fetch existing notification (if any) to check its 'acknowledged' status
+        const notificationSnap = await getDoc(notificationRef);
+        // Determine if an existing notification for this product has been acknowledged
+        const isAcknowledged = notificationSnap.exists() && notificationSnap.data()?.acknowledged === true;
+
+        // --- Logic: Create/Update or Delete Notification ---
+
+        const newQte = quantity + reorderQuantity;
+
+        // Case 1: Stock is LOW
+        if (quantity <= minStockLevel) {
+            // Only create/update the notification if it's NOT already acknowledged
+            if (!isAcknowledged) {
+                console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
+                // Prepare notification data
+
+                // Add update operation to the batch
+                await updateDoc(productRef, {
+                    quantity: newQte,
+                    lastUpdated: serverTimestamp()});
+
+
+                if (notificationSnap.exists()) {
+                    console.log(`Firebase: Stock level OK for "${name}" (${productId}). Deleting existing notification.`);
+                    await deleteDoc(notificationRef);
+                }
+
+            } else {
+                // Stock is low, but user already acknowledged a previous alert for this product. Do nothing.
+                console.log(`Firebase: Low stock for "${name}" (${productId}) but notification already acknowledged. Ignoring.`);
+            }
+        }
+        // Case 2: Stock is OK
+        else {
+            // If stock is NOT low, delete the corresponding notification *only if it exists*.
+            if (notificationSnap.exists()) {
+                console.log(`Firebase: Stock level OK for "${name}" (${productId}). Deleting existing notification.`);
+                await deleteDoc(notificationRef);
+            }
+            // If stock is OK and no notification exists, do nothing.
+        }
+    } catch (error) {
+        console.error(`Firebase: Error during low stock check for product ${productId}:`, error);
+        // Don't re-throw here, allow other operations to continue if possible
+    }
+};
+
+
+
+
+
 /**
  * Fetches all active (acknowledged == false) low stock notifications from Firestore,
  * ordered by timestamp descending (most recent first).
@@ -590,12 +692,10 @@ export const getLowStockNotifications = async (): Promise<Notification[]> => {
     const db = getDb();
     if (!db) {
         console.warn("Firebase Firestore not available, returning empty notifications list.");
-        // Resolve with empty array if DB is unavailable
         return Promise.resolve([]);
     }
 
     const notificationsCol = collection(db, 'notifications');
-    // Query for active notifications: where acknowledged is false, order by timestamp desc
     const q = query(
         notificationsCol,
         where('acknowledged', '==', false),
