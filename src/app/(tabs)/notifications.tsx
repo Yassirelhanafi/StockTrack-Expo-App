@@ -16,8 +16,8 @@ export default function NotificationsScreen() {
   const { data: notifications, isLoading, error, refetch, isRefetching, status } = useQuery<Notification[]>({
     queryKey: ['notifications'], // Unique key for this query
     queryFn: getLowStockNotifications, // Function to fetch data
-    staleTime: 30 * 1000, // Data considered fresh for 30 seconds
-    refetchInterval: 60 * 1000, // Automatically refetch every 60 seconds
+    staleTime: 8 * 1000, // Data considered fresh for 30 seconds
+    refetchInterval: 10 * 1000, // Automatically refetch every 60 seconds
     enabled: isFirebaseAvailable, // *Only* run this query if Firebase is available
   });
 

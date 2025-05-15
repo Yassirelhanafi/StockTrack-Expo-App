@@ -488,8 +488,12 @@ export const sendImmediateNotification = async (token: string, productName: stri
 };
 
 
-
-export const checkLowStock = async (productId: string, currentQuantity?: number, productName?: string, productMinStockLevel?: number ): Promise<void> => {
+export const checkLowStock = async (
+    productId: string,
+    currentQuantity?: number,
+    productName?: string,
+    productMinStockLevel?: number
+): Promise<void> => {
     const db = getDb();
     if (!db) {
         console.warn(`Firebase Firestore not available, skipping low stock check for ${productId}.`);
@@ -500,9 +504,6 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
     // Use the product ID as the document ID in the 'notifications' collection for easy lookup
     const notificationRef = doc(db, 'notifications', productId);
 
-    const batch = writeBatch(db); // Use a batch for efficient updates
-
-
     try {
         let quantity: number;
         let name: string | undefined;
@@ -510,7 +511,7 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
         let reorderQuantity: number | undefined;
 
         // Fetch product data from Firestore if quantity or name wasn't provided
-        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined || reorderQuantity === undefined) {
+        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined) {
             console.log(`Fetching product data for ${productId} to check stock...`);
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
@@ -519,7 +520,7 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
                 await deleteDoc(notificationRef).catch(() => {}); // Ignore error if notification didn't exist
                 return; // Exit check if product doesn't exist
             }
-            // Assert data type based on Firestore structure (adjust if needed)
+            // Assert data type based on Firestore structure
             const productData = productSnap.data() as Omit<Product, 'id'>;
             quantity = productData.quantity;
             name = productData.name;
@@ -529,62 +530,63 @@ export const checkLowStock = async (productId: string, currentQuantity?: number,
             // Use provided quantity and name
             quantity = currentQuantity;
             name = productName;
-            minStockLevel = productMinStockLevel
+            minStockLevel = productMinStockLevel;
+
+            // Important: Fetch reorderQuantity if not provided
+            const productSnap = await getDoc(productRef);
+            if (productSnap.exists()) {
+                const productData = productSnap.data() as Omit<Product, 'id'>;
+                reorderQuantity = productData.reorderQuantity;
+            }
         }
 
         // Fetch existing notification (if any) to check its 'acknowledged' status
         const notificationSnap = await getDoc(notificationRef);
-        // Determine if an existing notification for this product has been acknowledged
         const isAcknowledged = notificationSnap.exists() && notificationSnap.data()?.acknowledged === true;
-
-        // --- Logic: Create/Update or Delete Notification ---
-
-        const newQte = quantity + reorderQuantity;
 
         // Case 1: Stock is LOW
         if (quantity <= minStockLevel) {
             // Only create/update the notification if it's NOT already acknowledged
             if (!isAcknowledged) {
-                console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity} . Creating/Updating notification.`);
-                // Prepare notification data
+                console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity}. Creating/Updating notification.`);
 
+                // Envoyer notification push
+                try {
+                    const token = (await Notifications.getExpoPushTokenAsync()).data;
+                    await sendImmediateNotification(token, name!, quantity);
+                } catch (notifError) {
+                    console.error("Error sending push notification:", notifError);
+                }
 
-                const token = (await Notifications.getExpoPushTokenAsync()).data;
-
-                // Appeler la fonction d'envoi de notification
-                await sendImmediateNotification(token, name!, quantity);
-
+                // Créer/mettre à jour l'entrée dans la collection 'notifications'
                 const notificationData: Omit<Notification, 'id'> = {
                     productId: productId,
                     productName: name,
                     quantity: quantity,
-                    timestamp: serverTimestamp(), // Use server time for consistency
-                    acknowledged: false // Ensure new/updated alerts are active
+                    timestamp: serverTimestamp(),
+                    acknowledged: false,
+                    // Ajoutez ceci si votre interface utilise ce champ pour afficher les notifications
+                    read: false
                 };
-                // Use setDoc with merge:true - creates if not exists, updates if exists.
-                // Importantly, merge:true prevents overwriting `acknowledged` if it was somehow true before.
-                // Setting acknowledged:false explicitly ensures it's active.
+
                 await setDoc(notificationRef, notificationData, { merge: true });
+                console.log(`Notification created/updated in Firestore for ${productId}`);
             } else {
-                // Stock is low, but user already acknowledged a previous alert for this product. Do nothing.
                 console.log(`Firebase: Low stock for "${name}" (${productId}) but notification already acknowledged. Ignoring.`);
             }
         }
         // Case 2: Stock is OK
         else {
-            // If stock is NOT low, delete the corresponding notification *only if it exists*.
+            // If stock is NOT low, delete the corresponding notification *only if it exists*
             if (notificationSnap.exists()) {
                 console.log(`Firebase: Stock level OK for "${name}" (${productId}). Deleting existing notification.`);
                 await deleteDoc(notificationRef);
             }
-            // If stock is OK and no notification exists, do nothing.
         }
     } catch (error) {
         console.error(`Firebase: Error during low stock check for product ${productId}:`, error);
-        // Don't re-throw here, allow other operations to continue if possible
     }
 };
-
 
 
 export const AddStock = async (productId: string, currentQuantity?: number, productName?: string, productMinStockLevel?: number ): Promise<void> => {
