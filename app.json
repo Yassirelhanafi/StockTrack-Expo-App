@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "StockTrack",
-    "slug": "stocktrack-expo-app",
+    "slug": "stocktrack",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./src/assets/images/stockwatch_white.png",
@@ -45,7 +45,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "c8b0659d-97e3-4696-961a-12c4af4b5e66"
+        "projectId": "abc15ad7-ea1f-4326-a4c0-12a973079e01"
       },
       "firebaseApiKey": "AIzaSyDiK1Jxh3hCyaAADOkwELbUbH7EttnfHpk",
       "firebaseAuthDomain": "stockwatch-34392.firebaseapp.com",
