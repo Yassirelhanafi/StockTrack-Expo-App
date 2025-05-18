@@ -137,6 +137,14 @@ export const addProduct = async (
         await checkLowStock(productData.id, productData.quantity, productData.name);
 
 
+        if(productData.quantity <= productData.minStockLevel) {
+            await new Promise(resolve => setTimeout(resolve, 60000));
+        }
+        console.log('1 min stp ');
+        AddStock(productData.id, productData.newQuantity, productData.name,)
+
+
+
         return productData.id; // Return the ID on success
     } catch (error) {
         console.error(`Firebase: Error adding/updating product ${productData.id}: `, error);
