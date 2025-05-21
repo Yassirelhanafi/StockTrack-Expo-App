@@ -64,7 +64,7 @@ export default function TabLayout() {
             <Tabs.Screen
                 name="notifications" // Corresponds to src/app/(tabs)/notifications.tsx
                 options={{
-                    title: 'Notifications', // Header and Tab title
+                    title: 'Alertes', // Header and Tab title
                     // Example for adding a badge (implement logic later)
                     // tabBarBadge: 3,
                     // tabBarBadgeStyle: { backgroundColor: 'red', color: 'white' },
