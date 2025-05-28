@@ -304,7 +304,7 @@ export const decrementQuantities = async (): Promise<void> => {
     // Query for products that have a consumptionRate defined and have quantity > 0
     const q = query(productsRef,
         where('consumptionRate', '!=', null), // Field must exist and not be null
-        where('quantity', '>', 0) // Only process items that have stockr
+        where('quantity', '>=', 0) // Only process items that have stockr
     );
 
 
@@ -316,24 +316,22 @@ export const decrementQuantities = async (): Promise<void> => {
     const productsToCheckStock: { id: string, name: string | undefined, newQuantity: number }[] = [];
 
 
-    console.log(`Firebase: Running decrement check at ${now.toISOString()}...`);
 
     try {
-        console.log(`Firebase: Fetching products for decrement check...`);
         const querySnapshot = await getDocs(q);
-        console.log(`Firebase: Found ${querySnapshot.docs.length} products with rate and quantity > 0 to check.`);
 
         querySnapshot.forEach((docSnap) => {
 
             const product = { id: docSnap.id, ...docSnap.data() } as Product;
-            console.log(`processing ddddddddddddddddddddddd ${product.lastDecremented}`)
+
+
+
             const rate = product.consumptionRate;
 
             // Get the last decremented date, default to distant past if invalid/missing
             let lastDecrementedDate = new Date(0); // Start with epoch
             if (product.lastDecremented instanceof Timestamp) {
                 lastDecrementedDate = product.lastDecremented.toDate();
-                console.log(`time =${product.lastDecremented.toDate()}`)
 
             } else if (product.lastDecremented === null) {
                 // If explicitly null, treat as never decremented before for calculation
@@ -348,21 +346,19 @@ export const decrementQuantities = async (): Promise<void> => {
             }
 
             // Should not happen due to query, but safety checks
-            if (!rate || !rate.amount || rate.amount <= 0 || rate.period <=0 || product.quantity <= 0) return;
+            if (!rate || !rate.amount || rate.amount <= 0 || rate.period <=0 ) return;
 
             const period = rate.period && rate.period > 0 ? rate.period : 1;
 
             // Calculate time difference and periods passed
             const diffTime = now.getTime() - lastDecrementedDate.getTime();
-            console.log(now.getTime())
-            console.log(`${diffTime}`)
+
             if (diffTime <= 0) {
                 return product; // No time passed or potential clock skew
             }
 
             const diffhours = diffTime / (1000 * 60 * 60);
 
-            console.log(`${diffhours}`)
             let periodsPassed = 0;
 
             if (rate.unit === 'hour') {
@@ -386,7 +382,6 @@ export const decrementQuantities = async (): Promise<void> => {
 
                 // If quantity actually changed
                 if (newQuantity < product.quantity) {
-                    console.log(`Firebase: Decrementing ${product.name} (${product.id}) by ${quantityToDecrement}. Old: ${product.quantity}, New: ${newQuantity}`);
                     const productDocRef = doc(db, 'products', product.id);
                     // Add update operation to the batch
                     batch.update(productDocRef, {
@@ -396,7 +391,6 @@ export const decrementQuantities = async (): Promise<void> => {
                     });
                     updatesMade++;
                     // Add to list for low stock check after commit
-                    productsToCheckStock.push({ id: product.id, name: product.name, newQuantity });
 
                     // --- Sync change back to local storage (fire-and-forget) ---
                     // Attempt to update the local quantity immediately.
@@ -410,48 +404,47 @@ export const decrementQuantities = async (): Promise<void> => {
                     // Case: Time has passed, but calculated decrement is 0 or less.
                     // We should still update the `lastDecremented` timestamp to prevent
                     // re-calculating needlessly in the next run.
-                    console.log(`Firebase: Updating lastDecremented for ${product.name} (${product.id}) as time passed but quantity unchanged.`);
                     const productDocRef = doc(db, 'products', product.id);
                     batch.update(productDocRef, {
                         lastDecremented: nowTimestamp,
                         // Optionally update lastUpdated here too if desired
                     });
+
+
                     // Don't increment updatesMade or check stock if only timestamp updated
                 }
+
+                productsToCheckStock.push({ id: product.id, name: product.name, newQuantity });
+
             }
         });
+
 
         // Commit the batch if any updates were added
         if (updatesMade > 0) {
             await batch.commit();
-            console.log(`Firebase: Batch commit successful for ${updatesMade} product quantity updates.`);
 
-            await Promise.all(
-                productsToCheckStock.map(p =>
 
-                    checkLowStock(p.id, p.newQuantity, p.name,)
-                        .catch(e => console.error(`Error during post-decrement low stock check for ${p.id}:`, e))
-                )
-            );
+            for (const docSnap of querySnapshot.docs) {
+                const product = { id: docSnap.id, ...docSnap.data() } as Product;
 
-            await new Promise(resolve => setTimeout(resolve, 60000));
-            // --- Check Low Stock for Affected Products ---
-            // Run checkLowStock concurrently for all products whose quantity changed.
-            console.log(`Firebase: Checking low stock status for ${productsToCheckStock.length} updated products...`);
-            await Promise.all(
-                productsToCheckStock.map(p =>
+                await checkLowStock(product.id, product.quantity, product.name);
+                await new Promise(resolve => setTimeout(resolve, 30000)); // facultatif
+                await AddStock(product.id, product.quantity, product.name);
+            }
 
-                    AddStock(p.id, p.newQuantity, p.name,)
-                        .catch(e => console.error(`Error during post-decrement low stock check for ${p.id}:`, e))
-                )
-            );
-            console.log("Firebase: Post-decrement low stock checks complete.");
-            // --- End Low Stock Check ---
 
         } else {
 
 
-            console.log("Firebase: No products required decrementing in this run.");
+            for (const docSnap of querySnapshot.docs) {
+                const product = { id: docSnap.id, ...docSnap.data() } as Product;
+
+                await checkLowStock(product.id, product.quantity, product.name);
+                await AddStock(product.id, product.quantity, product.name);
+            }
+
+
         }
     } catch (error) {
         console.error('Firebase: Error during batch decrement process: ', error);
@@ -508,6 +501,7 @@ export const checkLowStock = async (
         return; // Exit if DB not available
     }
 
+
     const productRef = doc(db, 'products', productId);
     // Use the product ID as the document ID in the 'notifications' collection for easy lookup
     const notificationRef = doc(db, 'notifications', productId);
@@ -519,7 +513,7 @@ export const checkLowStock = async (
         let reorderQuantity: number | undefined;
 
         // Fetch product data from Firestore if quantity or name wasn't provided
-        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined) {
+        if ( productName === undefined || productMinStockLevel === undefined) {
             console.log(`Fetching product data for ${productId} to check stock...`);
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
@@ -552,8 +546,11 @@ export const checkLowStock = async (
         const notificationSnap = await getDoc(notificationRef);
         const isAcknowledged = notificationSnap.exists() && notificationSnap.data()?.acknowledged === true;
 
+
         // Case 1: Stock is LOW
         if (quantity <= minStockLevel) {
+
+
             // Only create/update the notification if it's NOT already acknowledged
             if (!isAcknowledged) {
                 console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity}. Creating/Updating notification.`);
