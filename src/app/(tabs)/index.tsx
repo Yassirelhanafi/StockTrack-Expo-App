@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Alert, TextInput, Platform, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import {
+    View,
+    Text,
+    StyleSheet,
+    Alert,
+    TextInput,
+    Platform,
+    ScrollView,
+    TouchableOpacity,
+    ActivityIndicator,
+    Button
+} from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Toast from 'react-native-toast-message';
@@ -10,8 +21,8 @@ import {
 } from '@/lib/firebase/firestore'; // Firebase add function
 import { storeProduct, type Product as LocalProduct } from '@/lib/local-storage'; // Local storage functions
 import { Ionicons } from '@expo/vector-icons'; // Icons
-import { useFirebase } from '@/providers/firebase-provider'; // Hook to check Firebase availability
-
+import { useFirebase } from '@/providers/firebase-provider';
+import {useAudioPlayer} from "expo-audio"; // Hook to check Firebase availability
 // Regex for parsing consumption rate strings (e.g., "5 per day")
 // Allows number, space(s), "per", "every", or "/", space(s), unit (day/week/month)
 // Added escape for '/'
@@ -34,6 +45,7 @@ interface ProductData {
     reorderQuantity? : number
     // Timestamps (lastUpdated, lastDecremented) are added right before saving
 }
+
 
 
 export default function ScanScreen() {
@@ -627,6 +639,9 @@ export default function ScanScreen() {
         );
     }
 
+
+
+
     // State 3: Permission granted, render the main screen
     return (
         // Use ScrollView to handle content potentially exceeding screen height, especially with keyboard
@@ -808,7 +823,6 @@ export default function ScanScreen() {
 
             {/* Spacer at the bottom to ensure content doesn't hide behind tab bar */}
             <View style={{ height: 50 }} />
-
 
 
         </ScrollView>

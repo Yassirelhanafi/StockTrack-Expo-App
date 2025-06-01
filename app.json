@@ -22,11 +22,29 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE"
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK",
+        "android.permission.VIBRATE",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM"
       ],
+
       "notification": {
         "icon": "./src/assets/images/stockwatch_white.png",
-        "color": "#ffffff"
+        "color": "#ffffff",
+        "defaultChannel": "default",
+        "sounds": ["./src/assets/alert-85101.mp3"],
+        "androidMode": "default",
+        "androidCollapsedTitle": "Stock Alert"
       }
     },
     "web": {
@@ -34,7 +52,17 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-audio",
+      [
+        "expo-background-fetch",
+        {
+          "backgroundModes": ["background-fetch", "background-processing"]
+        }
+      ],
+      [
+        "expo-task-manager"
+      ]
     ],
     "scheme": "stocktrack",
     "experiments": {

@@ -1,26 +1,78 @@
 import {
-    getFirestore,
-    collection,
-    getDocs,
-    updateDoc,
-    doc,
-    query,
-    where,
-    serverTimestamp, // Use server timestamp for reliability
-    Timestamp, // Firestore Timestamp type
-    writeBatch, // For efficient multiple updates/deletes
-    getDoc, // For fetching single documents
-    setDoc, // For adding/overwriting documents
-    orderBy, // For sorting query results
-    deleteDoc, // For deleting documents
-    type Firestore, // Firestore type definition
+    getFirestore, collection, getDocs, updateDoc, doc, query, where, serverTimestamp, Timestamp, writeBatch, getDoc, setDoc, orderBy, deleteDoc, type Firestore,
 } from 'firebase/firestore';
 import * as Notifications from 'expo-notifications';
+import { Audio } from 'expo-av';
 
-import { getApps, type FirebaseApp } from 'firebase/app'; // For checking Firebase initialization
-//import { updateLocalProductQuantity } from '@/lib/local-storage'; // Function to update local quantity
+import * as TaskManager from 'expo-task-manager';
+import * as BackgroundFetch from 'expo-background-fetch';
 
-// --- Type Definitions ---
+const BACKGROUND_FETCH_TASK = 'background-fetch-stock-check';
+
+import { getApps, type FirebaseApp } from 'firebase/app';
+
+class AudioManager {
+    private static soundObject: Audio.Sound | null = null;
+    private static isLoaded = false;
+
+    static async initializeSound() {
+        try {
+
+
+            if (!this.soundObject) {
+                this.soundObject = new Audio.Sound();
+                // Remplacer par le chemin correct de votre fichier audio
+                await this.soundObject.loadAsync(require('./alert-85101.mp3'));
+                this.isLoaded = true;
+                console.log('✅ Son initialisé avec succès');
+            }
+        } catch (error) {
+            console.error('❌ Erreur lors de l\'initialisation du son:', error);
+        }
+    }
+
+    static async playAlert() {
+        try {
+            if (!this.isLoaded) {
+                await this.initializeSound();
+            }
+
+            if (this.soundObject) {
+                // Redémarrer le son s'il était déjà en cours de lecture
+                await this.soundObject.replayAsync();
+                console.log('🔊 Son d\'alerte joué');
+            }
+        } catch (error) {
+            console.error('❌ Erreur lors de la lecture du son:', error);
+        }
+    }
+
+    static async cleanup() {
+        try {
+            if (this.soundObject) {
+                await this.soundObject.unloadAsync();
+                this.soundObject = null;
+                this.isLoaded = false;
+                console.log('🧹 Ressources audio nettoyées');
+            }
+        } catch (error) {
+            console.error('❌ Erreur lors du nettoyage audio:', error);
+        }
+    }
+}
+
+// --- Configuration des notifications ---
+// Configuration pour les notifications en arrière-plan
+Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+
+    }),
+});
 
 // Product structure specifically for Firestore (uses Timestamps)
 export interface Product {
@@ -48,24 +100,104 @@ export interface Notification {
     acknowledged: boolean; // Flag if the user has dismissed the alert
 }
 
-// Threshold for triggering low stock notifications
-// const LOW_STOCK_THRESHOLD = 10;
 
-// --- Firestore Instance Management ---
-
-// Cached instances to avoid re-initialization
 let firebaseAppInstance: FirebaseApp | null = null;
 let firestoreDbInstance: Firestore | null = null;
 
 
-/**
- * Internal helper function to get the initialized Firestore instance.
- * Checks if Firebase app is initialized and configured.
- * Returns null if Firebase is not available/configured.
- * Not exported directly.
- */
+// Définir la tâche en arrière-plan
+TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
+    try {
+        console.log('🔄 Tâche en arrière-plan démarrée - vérification du stock');
+        await AudioManager.initializeSound();
+
+        // Exécuter le décrement automatique
+        await decrementQuantities();
+
+        // Programmer les prochaines notifications si nécessaire
+        await scheduleStockCheckNotifications();
+
+        console.log('✅ Tâche en arrière-plan terminée avec succès');
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+    } catch (error) {
+        console.error('❌ Erreur dans la tâche en arrière-plan:', error);
+        return BackgroundFetch.BackgroundFetchResult.Failed;
+    }
+});
+
+// Initialiser les tâches en arrière-plan
+export const initializeBackgroundTasks = async () => {
+    try {
+        // Vérifier si la tâche est déjà enregistrée
+        const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_FETCH_TASK);
+
+        if (!isRegistered) {
+            await BackgroundFetch.registerTaskAsync(BACKGROUND_FETCH_TASK, {
+                minimumInterval: 15 * 60, // 15 minutes minimum
+                stopOnTerminate: false,
+                startOnBoot: true,
+            });
+            console.log('✅ Tâche en arrière-plan enregistrée');
+        }
+    } catch (error) {
+        console.error('❌ Erreur lors de l\'enregistrement de la tâche en arrière-plan:', error);
+    }
+};
+
+// Fonction d'initialisation complète à appeler au démarrage
+export const initializeBackgroundServices = async () => {
+    try {
+        // Demander les permissions pour les notifications
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') {
+            console.warn('Permission de notification refusée');
+            return;
+        }
+
+        // Initialiser l'audio
+        await initializeAudio();
+
+        // Initialiser les tâches en arrière-plan
+        await initializeBackgroundTasks();
+
+        // Programmer les vérifications périodiques
+        await scheduleStockCheckNotifications();
+
+        console.log('✅ Services en arrière-plan initialisés');
+    } catch (error) {
+        console.error('❌ Erreur lors de l\'initialisation des services:', error);
+    }
+};
+
+// Programmer des notifications pour vérification périodique
+const scheduleStockCheckNotifications = async () => {
+    try {
+        // Annuler les notifications existantes
+        await Notifications.cancelAllScheduledNotificationsAsync();
+
+        // Programmer une notification toutes les heures pour vérifier le stock
+        await Notifications.scheduleNotificationAsync({
+            content: {
+                title: 'Vérification automatique du stock',
+                body: 'Vérification en cours...',
+                data: { type: 'stock_check' },
+            },
+            trigger: {
+                seconds: 15,
+                repeats: true,
+            },
+        });
+
+        console.log('✅ Notifications programmées pour la vérification du stock');
+    } catch (error) {
+        console.error('❌ Erreur lors de la programmation des notifications:', error);
+    }
+};
+
+
+
+
 const getDb = (): Firestore | null => {
-    // 1. Return cached instance if available
     if (firestoreDbInstance) {
         return firestoreDbInstance;
     }
@@ -99,51 +231,40 @@ const getDb = (): Firestore | null => {
 };
 
 
-// --- Product Functions (Interact with Firestore 'products' collection) ---
 
-/**
- * Adds or Updates a Product in Firestore using its ID as the document ID.
- * Converts Date objects in input to Firestore Timestamps before saving.
- * Uses `setDoc` with `merge: true` for create/update behavior.
- *
- * @param productData Product data (requires `id`, `name`, `quantity`, `lastUpdated`). Timestamps should be Date objects.
- * @returns Promise resolving to the product ID on success, or rejecting on error/unavailable DB.
- */
 export const addProduct = async (
-    productData: Omit<Product, 'lastUpdated' | 'lastDecremented'> & { lastUpdated: Date, lastDecremented?: Date }
+    productData: Omit<Product, 'lastUpdated' | 'lastDecremented'> & {
+        lastUpdated: Date,
+        lastDecremented?: Date,
+        newQuantity?: number // Correction: ajouter newQuantity optionnel
+    }
 ): Promise<string> => {
     const db = getDb();
     if (!db) {
-        // If DB not available, reject the promise clearly
         return Promise.reject(new Error("Firebase Firestore is not available or configured correctly."));
     }
 
     const productRef = doc(db, 'products', productData.id); // Reference document using product ID
 
     try {
-        // Prepare data for Firestore, converting Dates to Timestamps
         const dataToSave = {
             ...productData,
-            // Convert Date objects to Firestore Timestamps
             lastUpdated: Timestamp.fromDate(productData.lastUpdated),
-            // Handle optional lastDecremented date, ensuring it's null if undefined/null
             lastDecremented: productData.lastDecremented ? Timestamp.fromDate(productData.lastDecremented) : null
         };
 
-        // Use setDoc with merge:true to create if not exists, or update if exists
         await setDoc(productRef, dataToSave, { merge: true });
 
         console.log(`Firebase: Product ${productData.id} added/updated successfully.`);
         await checkLowStock(productData.id, productData.quantity, productData.name);
 
 
-        if(productData.quantity <= productData.minStockLevel) {
+        if(productData.quantity <= (productData.minStockLevel || 0)) {
             await new Promise(resolve => setTimeout(resolve, 60000));
+            console.log('1 min stop ');
+            // Correction: utiliser productData.newQuantity ou productData.quantity
+            await AddStock(productData.id, productData.quantity, productData.name);
         }
-        console.log('1 min stp ');
-        AddStock(productData.id, productData.newQuantity, productData.name,)
-
-
 
         return productData.id; // Return the ID on success
     } catch (error) {
@@ -205,7 +326,7 @@ export const removeProduct = async (productId: string): Promise<void> => {
         await Promise.all(deletions);
         console.log(`Related notifications for product ${productId} deleted from Firebase.`);
 
-    } catch (error) {
+    } catch (error: any) { // Correction: typer l'erreur
         console.error(`Error removing product ${productId}: `, error);
         throw new Error(`Failed to remove product ${productId}: ${error.message}`);
     }
@@ -265,8 +386,7 @@ export const updateProductQuantity = async (
         // 6. Vérifier si cette mise à jour déclenche une alerte de stock bas
         const { name, minStockLevel } = productData;
         try {
-            // Importer et appeler checkLowStock de manière dynamique
-            const { checkLowStock } = await import('./firestore');
+            // Correction: appel direct sans import dynamique
             await checkLowStock(productId, newQuantity, name, minStockLevel);
         } catch (lowStockError) {
             console.error(`Erreur lors de la vérification du stock bas: ${lowStockError}`);
@@ -304,7 +424,7 @@ export const decrementQuantities = async (): Promise<void> => {
     // Query for products that have a consumptionRate defined and have quantity > 0
     const q = query(productsRef,
         where('consumptionRate', '!=', null), // Field must exist and not be null
-        where('quantity', '>=', 0) // Only process items that have stockr
+        where('quantity', '>=', 0) // Only process items that have stock
     );
 
 
@@ -346,7 +466,7 @@ export const decrementQuantities = async (): Promise<void> => {
             }
 
             // Should not happen due to query, but safety checks
-            if (!rate || !rate.amount || rate.amount <= 0 || rate.period <=0 ) return;
+            if (!rate || !rate.amount || rate.amount <= 0 || rate.period <= 0) return;
 
             const period = rate.period && rate.period > 0 ? rate.period : 1;
 
@@ -354,22 +474,22 @@ export const decrementQuantities = async (): Promise<void> => {
             const diffTime = now.getTime() - lastDecrementedDate.getTime();
 
             if (diffTime <= 0) {
-                return product; // No time passed or potential clock skew
+                return; // Correction: return au lieu de return product
             }
 
-            const diffhours = diffTime / (1000 * 60 * 60);
+            const diffHours = diffTime / (1000 * 60 * 60); // Correction: nom de variable
 
             let periodsPassed = 0;
 
             if (rate.unit === 'hour') {
-                periodsPassed = Math.floor(diffhours/period);
+                periodsPassed = Math.floor(diffHours / period);
             } else if (rate.unit === 'day') {
-                periodsPassed = Math.floor(diffhours / (24*period));
+                periodsPassed = Math.floor(diffHours / (24 * period));
             } else if (rate.unit === 'week') {
-                periodsPassed = Math.floor(diffhours / (7*24*period));
+                periodsPassed = Math.floor(diffHours / (7 * 24 * period));
             } else if (rate.unit === 'month') {
                 // Approximate using average days in month
-                periodsPassed = Math.floor(diffhours / (30.4375*24*period));
+                periodsPassed = Math.floor(diffHours / (30.4375 * 24 * period));
             }
 
 
@@ -414,7 +534,7 @@ export const decrementQuantities = async (): Promise<void> => {
                     // Don't increment updatesMade or check stock if only timestamp updated
                 }
 
-                productsToCheckStock.push({ id: product.id, name: product.name, newQuantity });
+                productsToCheckStock.push({ id: product.id, name: product.name, newQuantity }); // Correction: utiliser newQuantity ici
 
             }
         });
@@ -429,7 +549,7 @@ export const decrementQuantities = async (): Promise<void> => {
                 const product = { id: docSnap.id, ...docSnap.data() } as Product;
 
                 await checkLowStock(product.id, product.quantity, product.name);
-                await new Promise(resolve => setTimeout(resolve, 30000)); // facultatif
+                await new Promise(resolve => setTimeout(resolve, 30000));
                 await AddStock(product.id, product.quantity, product.name);
             }
 
@@ -488,7 +608,6 @@ export const sendImmediateNotification = async (token: string, productName: stri
     console.log('✅ Notification envoyée :', result);
 };
 
-
 export const checkLowStock = async (
     productId: string,
     currentQuantity?: number,
@@ -513,7 +632,7 @@ export const checkLowStock = async (
         let reorderQuantity: number | undefined;
 
         // Fetch product data from Firestore if quantity or name wasn't provided
-        if ( productName === undefined || productMinStockLevel === undefined) {
+        if (currentQuantity === undefined || productName === undefined || productMinStockLevel === undefined) { // Correction: ajout de currentQuantity
             console.log(`Fetching product data for ${productId} to check stock...`);
             const productSnap = await getDoc(productRef);
             if (!productSnap.exists()) {
@@ -548,8 +667,33 @@ export const checkLowStock = async (
 
 
         // Case 1: Stock is LOW
-        if (quantity <= minStockLevel) {
+        if (quantity <= (minStockLevel || 0)) { // Correction: protection contre undefined
 
+            console.log(`Firebase: Low stock detected for "${name}" (ID: ${productId}), Qty: ${quantity}. Creating/Updating notification.`);
+
+            // Jouer le son seulement si l'app est au premier plan
+            // Correction: vérification de l'existence de usePermissions
+            try {
+                await AudioManager.playAlert();
+            } catch (audioError) {
+                console.error('Erreur lors de la lecture audio:', audioError);
+            }
+
+            // Programmer une notification push immédiate
+            await Notifications.scheduleNotificationAsync({
+                content: {
+                    title: 'Stock bas détecté !',
+                    body: `${name} est presque épuisé ! Quantité restante: ${quantity}`,
+                    sound: 'default',
+                    data: {
+                        productId: productId,
+                        productName: name,
+                        quantity: quantity,
+                        type: 'low_stock'
+                    },
+                },
+                trigger: null, // Notification immédiate
+            });
 
             // Only create/update the notification if it's NOT already acknowledged
             if (!isAcknowledged) {
@@ -564,9 +708,9 @@ export const checkLowStock = async (
                 }
 
                 // Créer/mettre à jour l'entrée dans la collection 'notifications'
-                const notificationData: Omit<Notification, 'id'> = {
+                const notificationData: Omit<Notification, 'id'> & { read?: boolean } = { // Correction: ajouter read optionnel
                     productId: productId,
-                    productName: name,
+                    productName: name || '', // Correction: valeur par défaut
                     quantity: quantity,
                     timestamp: serverTimestamp(),
                     acknowledged: false,
@@ -592,7 +736,6 @@ export const checkLowStock = async (
         console.error(`Firebase: Error during low stock check for product ${productId}:`, error);
     }
 };
-
 
 export const AddStock = async (productId: string, currentQuantity?: number, productName?: string, productMinStockLevel?: number ): Promise<void> => {
     const db = getDb();
@@ -760,3 +903,15 @@ export const acknowledgeNotification = async (notificationId: string): Promise<v
         }
     }
 }
+
+export { AudioManager };
+
+// Fonction d'initialisation à appeler au démarrage de l'app
+export const initializeAudio = async () => {
+    await AudioManager.initializeSound();
+};
+
+// Fonction de nettoyage à appeler à la fermeture de l'app
+export const cleanupAudio = async () => {
+    await AudioManager.cleanup();
+};
