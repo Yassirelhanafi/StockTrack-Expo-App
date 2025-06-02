@@ -63,6 +63,8 @@ export default function RootLayout() {
 
 
 
+
+
     return (
         // GestureHandlerRootView is required for react-native-gesture-handler
         <GestureHandlerRootView style={{ flex: 1 }}>

@@ -169,6 +169,24 @@ export const initializeBackgroundServices = async () => {
     }
 };
 
+const { Restricted, Denied } = BackgroundFetch;
+
+export async function registerBackgroundSync() {
+    const status = await BackgroundFetch.getStatusAsync();
+    if (status === Restricted || status === Denied) {
+        console.log('Background execution is disabled');
+        return;
+    }
+    await BackgroundFetch.registerTaskAsync(BACKGROUND_FETCH_TASK, {
+        minimumInterval: 60 * 15,
+        stopOnTerminate: false,
+        startOnBoot: true,
+    });
+    console.log('⏰ Background fetch enregistrement OK');
+}
+
+
+
 // Programmer des notifications pour vérification périodique
 const scheduleStockCheckNotifications = async () => {
     try {
